@@ -2,98 +2,153 @@
 
 BlankRelay is the relay backend for the Blank messaging and identity network.
 
----
+It supports:
 
-# 🚀 Setup Guide
+* relay-based messaging
+* prekey upload and fetch
+* queued message envelopes
+* decentralized identity ledger scaffolding
+* relay discovery
+* join mode and sync gating
+* sync slot capacity control
+* operator-safe admin controls
 
-This guide walks you through:
+⸻
 
-1. Setting up a DDNS (your relay address)
-2. Installing your relay
+# Setup Guide
+
+This guide walks you through three steps:
+
+1. Setting up a relay domain (DDNS)
+2. Installing and running your relay
 3. Connecting your relay to the Blank app
 
----
+⸻
 
-# 🌐 Part 1 — Set Up a DDNS (DuckDNS)
+## Part 1 — Set Up a Relay Domain (DDNS)
 
-Your relay needs a public address so users and other relays can reach it.
+Your relay needs a public address so devices and other relays can reach it.
 
-## Step 1
-
-Go to:
-
+Go to the DuckDNS website:
 https://www.duckdns.org
 
-## Step 2
+Sign in using Google or GitHub.
 
-Sign in using:
-- Google
-- GitHub
+Create a domain name. For example:
+yourrelay.duckdns.org
 
-## Step 3
+Save this domain. You will use it during setup.
 
-Create a domain.
+You may also see a DuckDNS token. Keep it saved, but it is not required for the basic relay setup.
 
-Example: yourrelay.duckdns.org
+⸻
 
-## Step 4
+## Part 2 — Install and Run Your Relay
 
-Save:
-- your domain (you will use this in setup)
-- your DuckDNS token (you may use later for auto-IP updates)
+On your Linux machine, install BlankRelay using the installer script from GitHub.
 
----
+Download and run the installer from:
+https://github.com/BlankNetworks/BlankRelay
 
-# ⚙️ Part 2 — Install Your Relay
+Follow the instructions in the repository to run the installer script.
 
-## One-command install (recommended)
-
-Run this on your Linux machine:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/BlankNetworks/BlankRelay/main/install_blankrelay.sh
-
-During install you will be asked:
+During setup, you will be asked for:
 
 Relay domain
-
-Enter your DuckDNS domain: yourrelay.duckdns.org
+Enter the domain you created earlier, for example:
+yourrelay.duckdns.org
 
 Admin token
+You can either:
 
-You can:
+* press Enter to generate one automatically
+* or enter your own secure token
 
-* press ENTER to auto-generate (recommended)
-* or paste your own secure token
+This admin token is private and should never be shared.
 
-Example token: a long random string (do not share this)
+After installation, your relay will start automatically.
 
-After install
+⸻
 
-Verify your relay is running
+#nVerify your relay
 
-Run: curl http://127.0.0.1:8080/health
+Open a browser or use any HTTP tool and visit:
 
-Expected: {"status":"ok"}
+http://127.0.0.1:8080/health
 
+You should see a response indicating the relay is running.
 
-IMPORTANT — Port Forwarding
+⸻
 
-You must open your relay to the internet. http://127.0.0.1:8080/health is for LOCAL testing, your relay machine will need to open port 443 for HTTPS connections externally.
+Port configuration (very important)
 
-On your router:
+BlankRelay runs locally on port 8080.
 
-* Port: 443
-* Protocol: TCP
-* Forward to: your machine’s local IP
+To make your relay accessible from the internet, you must configure your router.
 
+# Forward:
 
-Test externally
+* external port 443
+* to internal port 8080 on your relay machine
 
-Open in browser: http://yourrelay.duckdns.org:8080/health
+This allows your relay to be accessed using your domain without showing a port number.
 
-If you see: {"status":"ok"} , Your relay is live.
+⸻
 
----
+# Test public access
 
-# 📱 Part 3 — Connect Relay to Blank App
+Open in a browser:
+
+http://yourrelay.duckdns.org
+
+If everything is set correctly, you should see a healthy response.
+
+⸻
+
+Part 3 — Connect Relay to the Blank App
+
+Once your relay is running and publicly accessible, you can connect it to the Blank app.
+
+In the app:
+
+1. Go to relay settings or add relay
+2. Enter your relay address:
+
+http://yourrelay.duckdns.org
+
+3. Save the relay
+
+⸻
+
+# Test the connection
+
+Register a test user through the app.
+
+Your relay will:
+
+* accept the registration
+* store identity data
+* process messages
+
+If registration succeeds, your relay is fully working.
+
+⸻
+
+Local vs Public Access
+
+There are two ways to access your relay:
+
+Local (on the machine):
+http://127.0.0.1:8080
+
+Public (through your domain):
+http://yourrelay.duckdns.org
+
+⸻
+
+## Security Notes
+
+* Never share your admin token
+* Never upload your .env file to GitHub
+* Use a strong admin token
+* Keep your system updated
