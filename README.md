@@ -1,20 +1,45 @@
-# BlankRelay
+## Part 1 — Setting Up a DDNS
 
-BlankRelay is the relay backend for the Blank messaging and identity network.
+### Step 1 — Create a DuckDNS account
 
-It supports:
-- relay-based messaging
-- prekey upload and fetch
-- queued message envelopes
-- decentralized identity ledger scaffolding
-- relay discovery
-- join mode and sync gating
-- sync slot capacity control
-- operator-safe admin controls
+1. Go to:
+   `https://www.duckdns.org`
 
-## Quick start
+2. Sign in with one of the available options.
 
-### 1. Clone the repo
-```bash
-git clone https://github.com/BlankNetworks/BlankRelay.git
-cd BlankRelay
+3. After signing in, create a new DuckDNS subdomain.
+
+Example:
+`yourrelay.duckdns.org`
+
+4. Copy and save:
+- your DuckDNS domain
+- your DuckDNS token
+
+You will use the domain during BlankRelay setup.
+
+Your DuckDNS token is for DuckDNS itself.  
+Your BlankRelay admin token is separate and will be created during relay setup.
+
+### What you should have when finished
+
+You should now have:
+
+- DuckDNS domain  
+  Example: `yourrelay.duckdns.org`
+
+- DuckDNS token  
+  Example: a long random string from DuckDNS
+
+### Important note
+
+BlankRelay currently needs your relay domain during setup.
+
+Example:
+`yourrelay.duckdns.org`
+
+### Recommended next step
+
+Once your DDNS is created, continue to Part 2 — Installing the Relay.
+
+
