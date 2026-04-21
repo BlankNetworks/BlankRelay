@@ -1,16 +1,18 @@
 import requests
 
-from app.config import RELAY_DOMAIN
+from app.config import RELAY_DOMAIN, RELAY_REGISTRY_URL
 from app.ledger.validator_config import (
     MAX_SYNC_CLIENTS,
     SYNC_SOURCE_WEIGHT,
     THIS_RELAY_DOMAIN,
 )
-from app.config import RELAY_REGISTRY_URL
 
 
 def get_registry_base_url() -> str:
-    return (RELAY_REGISTRY_URL or "").rstrip("/")
+    url = (RELAY_REGISTRY_URL or "").rstrip("/")
+    if url.endswith("/relays"):
+        url = url[:-7]
+    return url
 
 
 def register_with_registry() -> bool:
