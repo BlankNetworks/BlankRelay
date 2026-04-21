@@ -520,7 +520,7 @@ def relay_forward_envelope(request: EnvelopeSendRequest, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Recipient not found on this relay")
 
     db_envelope = MessageEnvelope(
-        id=envelope.id,
+        envelope_id=envelope.id,
         type=envelope.type,
         sender_blank_id=envelope.senderBlankID,
         sender_device_id=envelope.senderDeviceID,
@@ -557,7 +557,7 @@ def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
 
     if local_recipient is not None:
         db_envelope = MessageEnvelope(
-            id=envelope.id,
+            envelope_id=envelope.id,
             type=envelope.type,
             sender_blank_id=envelope.senderBlankID,
             sender_device_id=envelope.senderDeviceID,
