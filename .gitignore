@@ -7,3 +7,4 @@ identity_ledger.db
 *.db
 *.sqlite
 *.sqlite3
+*.save
