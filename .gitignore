@@ -8,3 +8,4 @@ identity_ledger.db
 *.sqlite
 *.sqlite3
 *.save
+update_blankrelay.sh
