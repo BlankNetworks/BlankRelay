@@ -43,3 +43,13 @@ Example:
 Once your DDNS is created, continue to Part 2 — Installing the Relay.
 
 
+## Part 2 — Installing the Relay
+
+### Step 1 — Run the installer
+
+Run this command on your Linux machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BlankNetworks/BlankRelay/main/install_blankrelay.sh | bash
+
+### Step 2 — Enter your relay details
