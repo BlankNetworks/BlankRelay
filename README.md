@@ -51,7 +51,7 @@ Save:
 Run this on your Linux machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BlankNetworks/BlankRelay/main/install_blankrelay.sh | bash
+curl -fsSL https://raw.githubusercontent.com/BlankNetworks/BlankRelay/main/install_blankrelay.sh
 
 During install you will be asked:
 
