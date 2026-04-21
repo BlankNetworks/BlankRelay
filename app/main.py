@@ -13,6 +13,9 @@ from app.ledger.validator_config import IS_JOIN_MODE
 from app.ledger.blankid_registry_client import lookup_blankid
 from app.ledger.discovery_service import start_discovery_loop
 
+from app.ledger.blankid_registry_client import lookup_blankid
+from app.relay_forward_client import forward_envelope_to_relay
+
 from app.ledger.sync_state import is_relay_syncing
 from app.ledger.validator_config import BLOCK_CLIENT_WRITES_WHILE_SYNCING
 from app.ledger.commit_service import start_commit_loop
@@ -503,19 +506,58 @@ def fetch_prekeys(blankID: str, request: Request, db: Session = Depends(get_db))
         "message": "Prekey bundle fetched successfully",
     }
 
-@app.post("/api/envelopes/send", response_model=EnvelopeSendResponse)
-def send_envelope(payload: EnvelopeSendRequest, request: Request, db: Session = Depends(get_db)):
-    envelope = payload.envelope
-    get_active_user_or_404(db, envelope.senderBlankID)
-    get_active_user_or_404(db, envelope.recipientBlankID)
+@app.post("/api/envelopes/relay-forward")
+def relay_forward_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
+    envelope = request.envelope
 
-    existing = db.query(MessageEnvelope).filter(MessageEnvelope.envelope_id == envelope.id).first()
-    if existing is not None:
-        return {"success": True, "envelopeID": existing.envelope_id, "message": "Envelope queued successfully"}
+    recipient = (
+        db.query(User)
+        .filter(User.blank_id == envelope.recipientBlankID)
+        .first()
+    )
 
-    db.add(
-        MessageEnvelope(
-            envelope_id=envelope.id,
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="Recipient not found on this relay")
+
+    db_envelope = MessageEnvelope(
+        id=envelope.id,
+        type=envelope.type,
+        sender_blank_id=envelope.senderBlankID,
+        sender_device_id=envelope.senderDeviceID,
+        recipient_blank_id=envelope.recipientBlankID,
+        recipient_device_id=envelope.recipientDeviceID,
+        conversation_id=envelope.conversationID,
+        timestamp=envelope.timestamp,
+        ratchet_header_type=envelope.ratchetHeaderType,
+        ratchet_header_base64=envelope.ratchetHeaderBase64,
+        nonce_base64=envelope.nonceBase64,
+        ciphertext_base64=envelope.ciphertextBase64,
+        protocol_version=envelope.protocolVersion,
+    )
+
+    db.add(db_envelope)
+    db.commit()
+
+    return {
+        "success": True,
+        "envelopeID": envelope.id,
+        "message": "Envelope forwarded and stored successfully",
+    }
+
+
+@app.post("/api/envelopes/send")
+def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
+    envelope = request.envelope
+
+    local_recipient = (
+        db.query(User)
+        .filter(User.blank_id == envelope.recipientBlankID)
+        .first()
+    )
+
+    if local_recipient is not None:
+        db_envelope = MessageEnvelope(
+            id=envelope.id,
             type=envelope.type,
             sender_blank_id=envelope.senderBlankID,
             sender_device_id=envelope.senderDeviceID,
@@ -528,11 +570,35 @@ def send_envelope(payload: EnvelopeSendRequest, request: Request, db: Session = 
             nonce_base64=envelope.nonceBase64,
             ciphertext_base64=envelope.ciphertextBase64,
             protocol_version=envelope.protocolVersion,
-            is_delivered_or_processed=False,
         )
-    )
-    db.commit()
-    return {"success": True, "envelopeID": envelope.id, "message": "Envelope queued successfully"}
+
+        db.add(db_envelope)
+        db.commit()
+
+        return {
+            "success": True,
+            "envelopeID": envelope.id,
+            "message": "Envelope sent successfully",
+        }
+
+    routing_lookup = lookup_blankid(envelope.recipientBlankID)
+    if not routing_lookup.get("found"):
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    record = routing_lookup.get("record", {})
+    relay_domain = record.get("relayDomain")
+    if not relay_domain:
+        raise HTTPException(status_code=404, detail="Recipient relay not found")
+
+    forwarded = forward_envelope_to_relay(relay_domain, envelope.model_dump())
+    if not forwarded:
+        raise HTTPException(status_code=502, detail="Failed to forward envelope to recipient relay")
+
+    return {
+        "success": True,
+        "envelopeID": envelope.id,
+        "message": "Envelope forwarded to recipient relay",
+    }
 
 
 @app.get("/api/envelopes/poll", response_model=EnvelopePollResponse)
