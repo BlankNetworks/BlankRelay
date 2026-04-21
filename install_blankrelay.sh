@@ -26,7 +26,7 @@ fi
 
 echo "Installing system packages..."
 sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip curl openssl
+sudo apt install -y git python3 python3-venv python3-pip curl openssl caddy
 
 if [ -d "$INSTALL_DIR" ]; then
   echo "Existing BlankRelay directory found at $INSTALL_DIR"
@@ -53,7 +53,7 @@ pip install -r requirements.txt
 
 echo "Writing .env..."
 cat > .env <<EOF
-APP_HOST=0.0.0.0
+APP_HOST=127.0.0.1
 APP_PORT=8080
 EMAIL_DOMAIN=blank.mail
 CORS_ORIGINS=*
@@ -88,7 +88,7 @@ cat > relay_registry.json <<EOF
 }
 EOF
 
-echo "Creating systemd service..."
+echo "Creating BlankRelay systemd service..."
 sudo tee /etc/systemd/system/blank-coms-backend.service > /dev/null <<EOF
 [Unit]
 Description=Blank Coms Backend
@@ -98,7 +98,7 @@ After=network.target
 User=$USER
 WorkingDirectory=$INSTALL_DIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+ExecStart=$INSTALL_DIR/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
 Restart=always
 RestartSec=3
 
@@ -106,29 +106,50 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-echo "Reloading systemd..."
+echo "Writing Caddy config..."
+sudo tee /etc/caddy/Caddyfile > /dev/null <<EOF
+$RELAY_DOMAIN {
+    reverse_proxy 127.0.0.1:8080
+}
+EOF
+
+echo "Validating Caddy config..."
+sudo caddy validate --config /etc/caddy/Caddyfile
+
+echo "Reloading services..."
 sudo systemctl daemon-reload
 sudo systemctl enable blank-coms-backend
 sudo systemctl restart blank-coms-backend
+sudo systemctl enable caddy
+sudo systemctl reload caddy
 
 sleep 3
 
 echo ""
-echo "Checking health..."
+echo "Checking local relay health..."
 curl http://127.0.0.1:8080/health || true
+echo ""
+echo ""
+echo "Checking public HTTPS health..."
+curl https://$RELAY_DOMAIN/health || true
 echo ""
 echo ""
 echo "Installation complete."
 echo ""
 echo "Your relay domain: $RELAY_DOMAIN"
-echo "Your admin token:  $ADMIN_TOKEN"
+echo "Your public relay URL: https://$RELAY_DOMAIN"
+echo "Your admin token: $ADMIN_TOKEN"
 echo ""
 echo "Important:"
 echo "- Save your admin token securely"
-echo "- Forward TCP port 8080 on your router to this machine"
-echo "- Test externally: http://$RELAY_DOMAIN:8080/health"
+echo "- Forward public TCP port 443 on your router to this machine"
+echo "- Your relay app runs locally on 127.0.0.1:8080"
+echo "- Caddy serves your relay publicly on HTTPS 443"
 echo ""
 echo "Useful commands:"
 echo "sudo systemctl status blank-coms-backend --no-pager"
+echo "sudo systemctl status caddy --no-pager"
 echo "sudo journalctl -u blank-coms-backend -n 50 --no-pager"
-echo "curl http://127.0.0.1:8080/ledger/network-mode"
+echo "sudo journalctl -u caddy -n 50 --no-pager"
+echo "curl http://127.0.0.1:8080/health"
+echo "curl https://$RELAY_DOMAIN/health"
