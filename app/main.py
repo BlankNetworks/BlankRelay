@@ -601,6 +601,13 @@ def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/envelopes/flush")
+def flush_envelopes(db: Session = Depends(get_db)):
+    db.query(MessageEnvelope).delete()
+    db.commit()
+    return {"status": "flushed"}
+
+
 @app.get("/api/envelopes/poll", response_model=EnvelopePollResponse)
 def poll_envelopes(
     recipientBlankID: str = Query(..., min_length=3, max_length=32),
