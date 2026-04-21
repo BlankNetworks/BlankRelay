@@ -1,55 +1,25 @@
-## Part 1 — Setting Up a DDNS
+cat <<'EOF'
+## 🌐 Part 1 — Setting Up a DDNS (DuckDNS)
 
-### Step 1 — Create a DuckDNS account
+1️⃣ Go to:
+https://www.duckdns.org
 
-1. Go to:
-   `https://www.duckdns.org`
+2️⃣ Sign in (Google / GitHub / etc.)
 
-2. Sign in with one of the available options.
+3️⃣ Create a domain  
+Example:
+yourrelay.duckdns.org
 
-3. After signing in, create a new DuckDNS subdomain.
+4️⃣ Click "add domain"
+
+5️⃣ Copy and save your domain  
+You will use this later during relay setup
 
 Example:
-`yourrelay.duckdns.org`
+yourrelay.duckdns.org
 
-4. Copy and save:
-- your DuckDNS domain
-- your DuckDNS token
+6️⃣ (Optional but recommended) Save your DuckDNS token  
+You may use it later if you want automatic IP updates
 
-You will use the domain during BlankRelay setup.
-
-Your DuckDNS token is for DuckDNS itself.  
-Your BlankRelay admin token is separate and will be created during relay setup.
-
-### What you should have when finished
-
-You should now have:
-
-- DuckDNS domain  
-  Example: `yourrelay.duckdns.org`
-
-- DuckDNS token  
-  Example: a long random string from DuckDNS
-
-### Important note
-
-BlankRelay currently needs your relay domain during setup.
-
-Example:
-`yourrelay.duckdns.org`
-
-### Recommended next step
-
-Once your DDNS is created, continue to Part 2 — Installing the Relay.
-
-
-## Part 2 — Installing the Relay
-
-### Step 1 — Run the installer
-
-Run this command on your Linux machine:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/BlankNetworks/BlankRelay/main/install_blankrelay.sh | bash
-
-### Step 2 — Enter your relay details
+🎯 Done — You now have your relay domain ready
+EOF
