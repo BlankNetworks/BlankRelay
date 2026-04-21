@@ -10,7 +10,7 @@ from app.ledger.join_state import get_join_mode
 from app.ledger.registry_heartbeat import start_registry_heartbeat
 from app.ledger.join_state import set_join_mode
 from app.ledger.validator_config import IS_JOIN_MODE
-
+from app.ledger.blankid_registry_client import lookup_blankid
 from app.ledger.discovery_service import start_discovery_loop
 
 from app.ledger.sync_state import is_relay_syncing
@@ -250,6 +250,13 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Blank ID is already taken",
+            )
+
+        backup_lookup = lookup_blankid(payload.blankID)
+        if backup_lookup.get("found"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Blank ID is already taken (backup registry)",
             )
 
         claimed_at = datetime.now(timezone.utc).isoformat()

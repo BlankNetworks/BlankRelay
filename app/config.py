@@ -26,3 +26,4 @@ LOCAL_RELAY_REGISTRY_FILE = getenv("LOCAL_RELAY_REGISTRY_FILE", "./relay_registr
 USE_LOCAL_RELAY_REGISTRY = getenv("USE_LOCAL_RELAY_REGISTRY", "true").lower() == "true"
 RELAY_JOIN_MODE = getenv("RELAY_JOIN_MODE", "false").lower() == "true"
 RELAY_AUTO_EXIT_JOIN_MODE_ON_SYNC = getenv("RELAY_AUTO_EXIT_JOIN_MODE_ON_SYNC", "true").lower() == "true"
+BLANKID_REGISTRY_URL = getenv("BLANKID_REGISTRY_URL", "")

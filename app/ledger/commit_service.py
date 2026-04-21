@@ -3,7 +3,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from hashlib import sha256
-
+from app.ledger.blankid_registry_client import publish_blankid
 from app.ledger.quorum import is_multi_relay_enforced, quorum_required
 
 from app.db.ledger_database import LedgerSessionLocal
@@ -120,6 +120,14 @@ def commit_one_round():
                         "claim_status": "collision_rejected",
                     }
                 )
+
+            publish_blankid(
+                blank_id=first.blank_id,
+                relay_domain=first.relay_domain,
+                client_claim_hash=first.client_claim_hash,
+                block_index=next_index,
+                claimed_at=first.claimed_at,
+            )
 
             claims_hash = claims_hash_for_block(claims)
             block_hash = build_block_hash(
