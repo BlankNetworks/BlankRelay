@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from app.startup_checks import run_startup_checks
 from app.ledger.join_state import get_join_mode
-
+from app.ledger.registry_heartbeat import start_registry_heartbeat
 from app.ledger.join_state import set_join_mode
 from app.ledger.validator_config import IS_JOIN_MODE
 
@@ -134,6 +134,7 @@ def build_ownership_payload(
     return canonical.encode("utf-8")
 
 def initialize_ledger_defaults():
+    start_registry_heartbeat()
     start_sync_checker()
     start_commit_loop()
     start_discovery_loop()
