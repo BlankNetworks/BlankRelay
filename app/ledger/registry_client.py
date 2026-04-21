@@ -6,11 +6,11 @@ from app.ledger.validator_config import (
     SYNC_SOURCE_WEIGHT,
     THIS_RELAY_DOMAIN,
 )
+from app.config import RELAY_REGISTRY_URL
 
 
 def get_registry_base_url() -> str:
-    from app.ledger.peers import get_registry_url
-    return get_registry_url().rstrip("/")
+    return (RELAY_REGISTRY_URL or "").rstrip("/")
 
 
 def register_with_registry() -> bool:
