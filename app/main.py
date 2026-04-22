@@ -1,42 +1,36 @@
 import base64
 import binascii
 import json
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+
 from app.startup_checks import run_startup_checks
-from app.ledger.join_state import get_join_mode
-from app.ledger.registry_heartbeat import start_registry_heartbeat
-from app.ledger.join_state import set_join_mode
-from app.ledger.validator_config import IS_JOIN_MODE
-from app.ledger.blankid_registry_client import lookup_blankid
-from app.ledger.discovery_service import start_discovery_loop
-from app.ledger.local_registry_index import load_id_index, load_relay_index
-from app.ledger.blankid_registry_client import publish_blankid
-from app.ledger.relay_health_state import get_health_state
-from app.ledger.dynamic_peers import get_dynamic_peers
-from app.ledger.peer_scoring import start_peer_scoring, get_peer_scores
-from app.ledger.blankid_registry_client import lookup_blankid
-from app.relay_forward_client import forward_envelope_to_relay
-
-from app.ledger.sync_state import is_relay_syncing
-from app.ledger.validator_config import BLOCK_CLIENT_WRITES_WHILE_SYNCING
+from app.config import RELAY_DOMAIN
+from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
+from app.ledger.blankid_registry_client import lookup_blankid, publish_blankid
 from app.ledger.commit_service import start_commit_loop
-
+from app.ledger.discovery_service import start_discovery_loop
+from app.ledger.dynamic_peers import get_dynamic_peers
+from app.ledger.join_state import get_join_mode, set_join_mode
+from app.ledger.local_registry_index import load_id_index, load_relay_index
+from app.ledger.models import ConsensusState, OwnershipIndex, PendingClaim
+from app.ledger.peer_scoring import get_peer_scores, start_peer_scoring
+from app.ledger.registry_heartbeat import start_registry_heartbeat
+from app.ledger.relay_health_state import get_health_state
+from app.ledger.routes_public import router as ledger_public_router
 from app.ledger.routes_validator import router as ledger_validator_router
 from app.ledger.sync_service import start_sync_checker
-from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
-from app.ledger.models import ConsensusState
-from app.ledger.routes_public import router as ledger_public_router
-
-from datetime import datetime, timezone
-from hashlib import sha256
-
-from app.config import RELAY_DOMAIN
-from app.db.ledger_database import LedgerSessionLocal
-from app.ledger.models import OwnershipIndex, PendingClaim
-
+from app.ledger.sync_state import is_relay_syncing
+from app.ledger.validator_config import BLOCK_CLIENT_WRITES_WHILE_SYNCING, IS_JOIN_MODE
+from app.relay_forward_client import forward_envelope_to_relay
 
 from .config import (
     ADMIN_DELETE_TOKEN,
@@ -45,13 +39,14 @@ from .config import (
     CORS_ORIGINS,
     EMAIL_DOMAIN,
 )
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
 from .database import Base, engine, get_db
-from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User
+from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice
 from .schemas import (
     DeleteUserResponse,
+    DeviceLinkCompleteRequest,
+    DeviceLinkCompleteResponse,
+    DeviceLinkRequestCreate,
+    DeviceLinkRequestResponse,
     EnvelopePollResponse,
     EnvelopeResponseItem,
     EnvelopeSendRequest,
@@ -67,8 +62,11 @@ from .schemas import (
     ReceiptResponse,
     RegisterRequest,
     RegisterResponse,
+    UserDeviceOut,
+    UserDevicesResponse,
 )
 from .security import hash_password, verify_password
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -261,7 +259,107 @@ def check_blank_id(blankID: str = Query(..., min_length=3, max_length=32), db: S
 
     return {"blankID": normalized_blank_id, "available": True}
 
+@app.post("/api/devices/link/request", response_model=DeviceLinkRequestResponse)
+def create_device_link_request(payload: DeviceLinkRequestCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.blank_id == payload.blankID, User.is_deleted == False).first()  # noqa: E712
+    if existing_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
+    primary = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == payload.blankID,
+            UserDevice.device_id == payload.primaryDeviceID,
+            UserDevice.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if primary is None:
+        raise HTTPException(status_code=404, detail="Primary device not found")
+
+    link_code = secrets.token_hex(4)
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+
+    primary.link_code = link_code
+    primary.link_code_expires_at = expires_at
+    db.commit()
+
+    return {
+        "success": True,
+        "blankID": payload.blankID,
+        "linkCode": link_code,
+        "expiresAt": expires_at,
+    }
+
+
+@app.post("/api/devices/link/complete", response_model=DeviceLinkCompleteResponse)
+def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depends(get_db)):
+    primary = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == payload.blankID,
+            UserDevice.is_primary == True,  # noqa: E712
+            UserDevice.is_active == True,  # noqa: E712
+            UserDevice.link_code == payload.linkCode,
+        )
+        .first()
+    )
+    if primary is None:
+        raise HTTPException(status_code=404, detail="Invalid link code")
+
+    existing_device = db.query(UserDevice).filter(UserDevice.device_id == payload.deviceID).first()
+    if existing_device is not None:
+        raise HTTPException(status_code=409, detail="Device already exists")
+
+    new_device = UserDevice(
+        blank_id=payload.blankID,
+        device_id=payload.deviceID,
+        device_label=payload.deviceLabel,
+        identity_key_base64=payload.identityKeyBase64,
+        identity_signing_public_key_base64=payload.identitySigningPublicKeyBase64,
+        is_primary=False,
+        is_active=True,
+        linked_by_device_id=primary.device_id,
+    )
+    db.add(new_device)
+
+    primary.link_code = None
+    primary.link_code_expires_at = None
+
+    db.commit()
+
+    return {
+        "success": True,
+        "blankID": payload.blankID,
+        "deviceID": payload.deviceID,
+        "message": "Secondary device linked successfully",
+    }
+
+
+@app.get("/api/devices/{blank_id}", response_model=UserDevicesResponse)
+def list_user_devices(blank_id: str, db: Session = Depends(get_db)):
+    rows = (
+        db.query(UserDevice)
+        .filter(UserDevice.blank_id == blank_id, UserDevice.is_active == True)  # noqa: E712
+        .all()
+    )
+
+    return {
+        "success": True,
+        "blankID": blank_id,
+        "devices": [
+            {
+                "blankID": row.blank_id,
+                "deviceID": row.device_id,
+                "deviceLabel": row.device_label,
+                "identityKeyBase64": row.identity_key_base64,
+                "identitySigningPublicKeyBase64": row.identity_signing_public_key_base64,
+                "isPrimary": row.is_primary,
+                "isActive": row.is_active,
+            }
+            for row in rows
+        ],
+    }
 
 @app.post("/api/register", response_model=RegisterResponse)
 def register_user(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
@@ -350,6 +448,19 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
         db.commit()
 
         db.refresh(new_user)
+
+        primary_device = UserDevice(
+            blank_id=payload.blankID,
+            device_id=payload.nonce,
+            device_label="Primary Device",
+            identity_key_base64=payload.identityKeyBase64,
+            identity_signing_public_key_base64=payload.identitySigningPublicKeyBase64,
+            is_primary=True,
+            is_active=True,
+            linked_by_device_id=None,
+        )
+        db.add(primary_device)
+        db.commit()
 
         # publish to backup registry
         publish_blankid(

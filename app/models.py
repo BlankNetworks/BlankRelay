@@ -1,6 +1,8 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from sqlalchemy.sql import func
+
 from .database import Base
 
 
@@ -20,6 +22,26 @@ class User(Base):
     claimed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     prekey_bundles = relationship("PrekeyBundle", back_populates="user", cascade="all, delete-orphan")
+
+class UserDevice(Base):
+    __tablename__ = "user_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    blank_id = Column(String, index=True, nullable=False)
+    device_id = Column(String, unique=True, index=True, nullable=False)
+    device_label = Column(String, nullable=True)
+
+    identity_key_base64 = Column(Text, nullable=False)
+    identity_signing_public_key_base64 = Column(Text, nullable=False)
+
+    is_primary = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    linked_by_device_id = Column(String, nullable=True)
+    link_code = Column(String, nullable=True, index=True)
+    link_code_expires_at = Column(String, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class PrekeyBundle(Base):

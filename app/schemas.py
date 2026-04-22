@@ -7,6 +7,50 @@ def normalize_blank_id(value: str) -> str:
     return value.strip().lower()
 
 
+class DeviceLinkRequestCreate(BaseModel):
+    blankID: str
+    primaryDeviceID: str
+
+
+class DeviceLinkRequestResponse(BaseModel):
+    success: bool
+    blankID: str
+    linkCode: str
+    expiresAt: str
+
+
+class DeviceLinkCompleteRequest(BaseModel):
+    blankID: str
+    linkCode: str
+    deviceID: str
+    deviceLabel: str | None = None
+    identityKeyBase64: str
+    identitySigningPublicKeyBase64: str
+
+
+class DeviceLinkCompleteResponse(BaseModel):
+    success: bool
+    blankID: str
+    deviceID: str
+    message: str
+
+
+class UserDeviceOut(BaseModel):
+    blankID: str
+    deviceID: str
+    deviceLabel: str | None = None
+    identityKeyBase64: str
+    identitySigningPublicKeyBase64: str
+    isPrimary: bool
+    isActive: bool
+
+
+class UserDevicesResponse(BaseModel):
+    success: bool
+    blankID: str
+    devices: list[UserDeviceOut]
+
+
 class IDCheckResponse(BaseModel):
     blankID: str
     available: bool
