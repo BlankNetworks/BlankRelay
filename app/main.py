@@ -4,7 +4,7 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-
+from app.relay_forward_client import forward_post, forward_get
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
