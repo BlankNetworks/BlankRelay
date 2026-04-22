@@ -259,8 +259,29 @@ def check_blank_id(blankID: str = Query(..., min_length=3, max_length=32), db: S
 
     return {"blankID": normalized_blank_id, "available": True}
 
+
 @app.post("/api/devices/link/request", response_model=DeviceLinkRequestResponse)
 def create_device_link_request(payload: DeviceLinkRequestCreate, db: Session = Depends(get_db)):
+
+    lookup = lookup_blankid(payload.blankID)
+
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+
+    # normalize
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    # if not local → forward
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_post(f"{owner}/api/devices/link/request", payload.dict())
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    # LOCAL HANDLING
     existing_user = db.query(User).filter(User.blank_id == payload.blankID, User.is_deleted == False).first()  # noqa: E712
     if existing_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -294,12 +315,30 @@ def create_device_link_request(payload: DeviceLinkRequestCreate, db: Session = D
 
 @app.post("/api/devices/link/complete", response_model=DeviceLinkCompleteResponse)
 def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depends(get_db)):
+
+    lookup = lookup_blankid(payload.blankID)
+
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    # forward if not local
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_post(f"{owner}/api/devices/link/complete", payload.dict())
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    # LOCAL HANDLING
     primary = (
         db.query(UserDevice)
         .filter(
             UserDevice.blank_id == payload.blankID,
             UserDevice.is_primary == True,  # noqa: E712
-            UserDevice.is_active == True,  # noqa: E712
             UserDevice.link_code == payload.linkCode,
         )
         .first()
@@ -307,8 +346,8 @@ def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depen
     if primary is None:
         raise HTTPException(status_code=404, detail="Invalid link code")
 
-    existing_device = db.query(UserDevice).filter(UserDevice.device_id == payload.deviceID).first()
-    if existing_device is not None:
+    existing = db.query(UserDevice).filter(UserDevice.device_id == payload.deviceID).first()
+    if existing:
         raise HTTPException(status_code=409, detail="Device already exists")
 
     new_device = UserDevice(
@@ -321,6 +360,7 @@ def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depen
         is_active=True,
         linked_by_device_id=primary.device_id,
     )
+
     db.add(new_device)
 
     primary.link_code = None
@@ -336,8 +376,26 @@ def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depen
     }
 
 
+
 @app.get("/api/devices/{blank_id}", response_model=UserDevicesResponse)
 def list_user_devices(blank_id: str, db: Session = Depends(get_db)):
+
+    lookup = lookup_blankid(blank_id)
+
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_get(f"{owner}/api/devices/{blank_id}")
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
     rows = (
         db.query(UserDevice)
         .filter(UserDevice.blank_id == blank_id, UserDevice.is_active == True)  # noqa: E712
@@ -349,17 +407,19 @@ def list_user_devices(blank_id: str, db: Session = Depends(get_db)):
         "blankID": blank_id,
         "devices": [
             {
-                "blankID": row.blank_id,
-                "deviceID": row.device_id,
-                "deviceLabel": row.device_label,
-                "identityKeyBase64": row.identity_key_base64,
-                "identitySigningPublicKeyBase64": row.identity_signing_public_key_base64,
-                "isPrimary": row.is_primary,
-                "isActive": row.is_active,
+                "blankID": r.blank_id,
+                "deviceID": r.device_id,
+                "deviceLabel": r.device_label,
+                "identityKeyBase64": r.identity_key_base64,
+                "identitySigningPublicKeyBase64": r.identity_signing_public_key_base64,
+                "isPrimary": r.is_primary,
+                "isActive": r.is_active,
             }
-            for row in rows
+            for r in rows
         ],
     }
+
+
 
 @app.post("/api/register", response_model=RegisterResponse)
 def register_user(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):

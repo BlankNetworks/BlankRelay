@@ -1,5 +1,20 @@
 import requests
 
+def forward_post(url: str, payload: dict):
+    try:
+        r = requests.post(url, json=payload, timeout=5)
+        return r.status_code, r.json()
+    except Exception:
+        return None, {"detail": "forward failed"}
+
+
+def forward_get(url: str):
+    try:
+        r = requests.get(url, timeout=5)
+        return r.status_code, r.json()
+    except Exception:
+        return None, {"detail": "forward failed"}
+
 
 def normalize_relay_url(relay_domain: str) -> str:
     relay_domain = relay_domain.strip()
