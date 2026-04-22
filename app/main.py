@@ -13,6 +13,8 @@ from app.ledger.validator_config import IS_JOIN_MODE
 from app.ledger.blankid_registry_client import lookup_blankid
 from app.ledger.discovery_service import start_discovery_loop
 
+from app.ledger.blankid_registry_client import publish_blankid
+
 from app.ledger.blankid_registry_client import lookup_blankid
 from app.relay_forward_client import forward_envelope_to_relay
 
@@ -314,7 +316,17 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
 
         db.add(new_user)
         db.commit()
+
         db.refresh(new_user)
+
+        # publish to backup registry
+        publish_blankid(
+           blank_id=payload.blankID,
+           relay_domain=THIS_RELAY_DOMAIN,
+           client_claim_hash="pending-register",
+           block_index=0,
+           claimed_at=datetime.utcnow().isoformat() + "Z",
+        )
 
         return {
             "success": True,
@@ -449,7 +461,62 @@ def upload_prekeys(payload: PrekeyBundleUploadRequest, request: Request, db: Ses
         "message": "Prekey bundle uploaded successfully",
     }
 
+@app.get("/ledger/ids/check", response_model=IDCheckResponse)
+def check_blank_id(blankID: str, db: Session = Depends(get_db)):
+    normalized_blank_id = normalize_blank_id(blankID)
 
+    ledger_db = LedgerSessionLocal()
+    try:
+        head = ledger_db.query(LedgerBlock).order_by(LedgerBlock.block_index.desc()).first()
+        current_block_index = head.block_index if head is not None else 0
+
+        ownership = (
+            ledger_db.query(OwnershipIndex)
+            .filter(OwnershipIndex.blank_id == normalized_blank_id)
+            .first()
+        )
+        if ownership is not None:
+            return {
+                "blankID": normalized_blank_id,
+                "available": False,
+                "source": "ledger",
+                "isSynced": True,
+                "currentBlockIndex": current_block_index,
+            }
+
+        local_user = (
+            db.query(User)
+            .filter(User.blank_id == normalized_blank_id, User.is_deleted == False)
+            .first()
+        )
+        if local_user is not None:
+            return {
+                "blankID": normalized_blank_id,
+                "available": False,
+                "source": "local_user",
+                "isSynced": True,
+                "currentBlockIndex": current_block_index,
+            }
+
+        backup_lookup = lookup_blankid(normalized_blank_id)
+        if backup_lookup.get("found"):
+            return {
+                "blankID": normalized_blank_id,
+                "available": False,
+                "source": "backup_registry",
+                "isSynced": True,
+                "currentBlockIndex": current_block_index,
+            }
+
+        return {
+            "blankID": normalized_blank_id,
+            "available": True,
+            "source": "ledger",
+            "isSynced": True,
+            "currentBlockIndex": current_block_index,
+        }
+    finally:
+        ledger_db.close()
 
 @app.get("/api/prekeys/{blankID}", response_model=PrekeyBundleFetchResponse)
 def fetch_prekeys(blankID: str, request: Request, db: Session = Depends(get_db)):
