@@ -2,7 +2,8 @@ import os
 import json
 import requests
 
-BASE = os.path.expanduser("~/blank-coms-backend/registry")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.join(BASE_DIR, "registry")
 
 
 def chunk_write(data, path, key_name, chunk_size=100):
