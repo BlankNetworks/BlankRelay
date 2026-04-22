@@ -13,6 +13,24 @@ from app.config import (
 from app.ledger.validator_config import THIS_RELAY_DOMAIN
 
 
+def normalize_relay_value(relay) -> str:
+    if isinstance(relay, str):
+        value = relay.strip()
+        if not value:
+            return ""
+        return value
+
+    if isinstance(relay, dict):
+        value = str(relay.get("relayDomain", "")).strip()
+        if not value:
+            return ""
+        if value.startswith("http://") or value.startswith("https://"):
+            return value
+        return f"https://{value}"
+
+    return ""
+
+
 def fetch_remote_registry_relays() -> list[str]:
     if not RELAY_REGISTRY_URL:
         return []
@@ -26,8 +44,9 @@ def fetch_remote_registry_relays() -> list[str]:
         relays = data.get("relays", [])
         clean = []
         for relay in relays:
-            if isinstance(relay, str) and relay.strip():
-                clean.append(relay.strip())
+            value = normalize_relay_value(relay)
+            if value:
+                clean.append(value)
         return clean
     except Exception:
         return []
@@ -39,18 +58,35 @@ def fetch_local_registry_relays() -> list[str]:
 
     try:
         path = Path(LOCAL_RELAY_REGISTRY_FILE)
-        if not path.exists():
-            return []
 
-        data = json.loads(path.read_text(encoding="utf-8"))
-        relays = data.get("relays", [])
+        files = []
+        if path.is_dir():
+            files = sorted(path.glob("*.json"))
+        elif path.exists():
+            files = [path]
+        else:
+            parent = path.parent
+            if parent.exists() and parent.is_dir():
+                files = sorted(parent.glob("*.json"))
+            else:
+                return []
+
         clean = []
-        for relay in relays:
-            if isinstance(relay, str) and relay.strip():
-                clean.append(relay.strip())
+        for file_path in files:
+            try:
+                data = json.loads(file_path.read_text(encoding="utf-8"))
+                relays = data.get("relays", [])
+                for relay in relays:
+                    value = normalize_relay_value(relay)
+                    if value:
+                        clean.append(value)
+            except Exception:
+                continue
+
         return clean
     except Exception:
         return []
+
 
 
 def fetch_registry_relays() -> list[str]:
@@ -85,3 +121,4 @@ def read_local_registry_payload() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"relays": []}
+
