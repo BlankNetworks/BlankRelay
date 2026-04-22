@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 
 from app.config import BLANKID_REGISTRY_URL
-
+from app.ledger.local_registry_index import get_blankid
 
 def get_blankid_registry_base_url() -> str:
     return (BLANKID_REGISTRY_URL or "").rstrip("/")
@@ -39,20 +39,9 @@ def publish_blankid(
 
 
 def lookup_blankid_local(blank_id: str) -> dict:
-    base = Path("./registry/ids")
-
-    if not base.exists():
-        return {"found": False}
-
-    for file_path in sorted(base.glob("*.json")):
-        try:
-            data = json.loads(file_path.read_text(encoding="utf-8"))
-            for record in data.get("blankIDs", []):
-                if record.get("blankID") == blank_id:
-                    return {"found": True, "record": record}
-        except Exception:
-            continue
-
+    record = get_blankid(blank_id)
+    if record:
+        return {"found": True, "record": record}
     return {"found": False}
 
 

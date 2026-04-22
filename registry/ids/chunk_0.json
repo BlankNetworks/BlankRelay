@@ -1,0 +1,46 @@
+{
+  "blankIDs": [
+    {
+      "blankID": "backup-test-1",
+      "relayDomain": "blankcoms.duckdns.org",
+      "clientClaimHash": "hash123",
+      "blockIndex": 999,
+      "claimedAt": "2026-04-21T00:00:00Z"
+    },
+    {
+      "blankID": "relaybtest8",
+      "relayDomain": "blankrelay.duckdns.org",
+      "clientClaimHash": "pending-register",
+      "blockIndex": 0,
+      "claimedAt": "2026-04-22T00:46:23.767333Z"
+    },
+    {
+      "blankID": "testeeeer",
+      "relayDomain": "blankrelay.duckdns.org",
+      "clientClaimHash": "pending-register",
+      "blockIndex": 0,
+      "claimedAt": "2026-04-22T02:44:41.581278Z"
+    },
+    {
+      "blankID": "testeeeeeeeeeeeee",
+      "relayDomain": "blankcoms.duckdns.org",
+      "clientClaimHash": "pending-register",
+      "blockIndex": 0,
+      "claimedAt": "2026-04-22T03:44:42.139285Z"
+    },
+    {
+      "blankID": "justin-test-one",
+      "relayDomain": "blankrelay.duckdns.org",
+      "clientClaimHash": "pending-register",
+      "blockIndex": 0,
+      "claimedAt": "2026-04-22T03:49:04.882221Z"
+    },
+    {
+      "blankID": "justin-test-two",
+      "relayDomain": "blankcoms.duckdns.org",
+      "clientClaimHash": "pending-register",
+      "blockIndex": 0,
+      "claimedAt": "2026-04-22T03:49:39.115404Z"
+    }
+  ]
+}

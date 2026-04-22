@@ -12,7 +12,7 @@ from app.ledger.join_state import set_join_mode
 from app.ledger.validator_config import IS_JOIN_MODE
 from app.ledger.blankid_registry_client import lookup_blankid
 from app.ledger.discovery_service import start_discovery_loop
-
+from app.ledger.local_registry_index import load_id_index, load_relay_index
 from app.ledger.blankid_registry_client import publish_blankid
 
 from app.ledger.blankid_registry_client import lookup_blankid
@@ -73,6 +73,8 @@ Base.metadata.create_all(bind=engine)
 LedgerBase.metadata.create_all(bind=ledger_engine)
 run_startup_checks()
 ledger_bootstrap_db = LedgerSessionLocal()
+load_id_index()
+load_relay_index()
 try:
     set_join_mode(ledger_bootstrap_db, IS_JOIN_MODE)
     ledger_bootstrap_db.commit()
@@ -343,7 +345,7 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
         # publish to backup registry
         publish_blankid(
            blank_id=payload.blankID,
-           relay_domain=THIS_RELAY_DOMAIN,
+           relay_domain=RELAY_DOMAIN,
            client_claim_hash="pending-register",
            block_index=0,
            claimed_at=datetime.utcnow().isoformat() + "Z",

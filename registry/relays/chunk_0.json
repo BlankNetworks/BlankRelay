@@ -1,0 +1,14 @@
+{
+  "relays": [
+    {
+      "relayDomain": "blankcoms.duckdns.org",
+      "syncSourceWeight": 100,
+      "maxSyncClients": 3
+    },
+    {
+      "relayDomain": "blankrelay.duckdns.org",
+      "syncSourceWeight": 100,
+      "maxSyncClients": 3
+    }
+  ]
+}
