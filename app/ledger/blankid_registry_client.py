@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import requests
 
 from app.config import BLANKID_REGISTRY_URL
@@ -35,7 +38,29 @@ def publish_blankid(
         return False
 
 
+def lookup_blankid_local(blank_id: str) -> dict:
+    base = Path("./registry/ids")
+
+    if not base.exists():
+        return {"found": False}
+
+    for file_path in sorted(base.glob("*.json")):
+        try:
+            data = json.loads(file_path.read_text(encoding="utf-8"))
+            for record in data.get("blankIDs", []):
+                if record.get("blankID") == blank_id:
+                    return {"found": True, "record": record}
+        except Exception:
+            continue
+
+    return {"found": False}
+
+
 def lookup_blankid(blank_id: str) -> dict:
+    local = lookup_blankid_local(blank_id)
+    if local.get("found"):
+        return local
+
     registry_url = get_blankid_registry_base_url()
     if not registry_url:
         return {"found": False}
@@ -51,3 +76,4 @@ def lookup_blankid(blank_id: str) -> dict:
         pass
 
     return {"found": False}
+
