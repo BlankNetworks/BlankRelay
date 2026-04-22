@@ -14,7 +14,9 @@ from app.ledger.blankid_registry_client import lookup_blankid
 from app.ledger.discovery_service import start_discovery_loop
 from app.ledger.local_registry_index import load_id_index, load_relay_index
 from app.ledger.blankid_registry_client import publish_blankid
-
+from app.ledger.relay_health_state import get_health_state
+from app.ledger.dynamic_peers import get_dynamic_peers
+from app.ledger.peer_scoring import start_peer_scoring, get_peer_scores
 from app.ledger.blankid_registry_client import lookup_blankid
 from app.relay_forward_client import forward_envelope_to_relay
 
@@ -145,6 +147,7 @@ def initialize_ledger_defaults():
     start_sync_checker()
     start_commit_loop()
     start_discovery_loop()
+    start_peer_scoring()
     db = LedgerSessionLocal()
     try:
         defaults = {
@@ -217,6 +220,12 @@ def get_active_user_or_404(db: Session, blank_id: str) -> User:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+@app.get("/relay/health")
+def relay_health():
+    state = get_health_state()
+    state["dynamicPeers"] = get_dynamic_peers()
+    state["dynamicPeerCount"] = len(state["dynamicPeers"])
+    return state
 
 @app.get("/health")
 def health_check():
@@ -594,6 +603,12 @@ def fetch_prekeys(blankID: str, request: Request, db: Session = Depends(get_db))
         "blankID": normalized_blank_id,
         "bundle": bundle_payload,
         "message": "Prekey bundle fetched successfully",
+    }
+
+@app.get("/relay/peers")
+def relay_peers():
+    return {
+        "peers": list(get_peer_scores().values())
     }
 
 @app.post("/api/envelopes/relay-forward")
