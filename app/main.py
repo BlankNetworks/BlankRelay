@@ -224,11 +224,32 @@ def health_check():
 @app.get("/api/ids/check", response_model=IDCheckResponse)
 def check_blank_id(blankID: str = Query(..., min_length=3, max_length=32), db: Session = Depends(get_db)):
     normalized_blank_id = blankID.strip().lower()
+
     existing_user = db.query(User).filter(User.blank_id == normalized_blank_id).first()
-    available = existing_user is None
-    if existing_user and existing_user.is_deleted and ALLOW_ID_REUSE_AFTER_DELETE:
-        available = True
-    return {"blankID": normalized_blank_id, "available": available}
+    if existing_user is not None:
+        available = False
+        if existing_user.is_deleted and ALLOW_ID_REUSE_AFTER_DELETE:
+            available = True
+        return {"blankID": normalized_blank_id, "available": available}
+
+    ledger_db = LedgerSessionLocal()
+    try:
+        ownership = (
+            ledger_db.query(OwnershipIndex)
+            .filter(OwnershipIndex.blank_id == normalized_blank_id)
+            .first()
+        )
+        if ownership is not None:
+            return {"blankID": normalized_blank_id, "available": False}
+    finally:
+        ledger_db.close()
+
+    backup_lookup = lookup_blankid(normalized_blank_id)
+    if backup_lookup.get("found"):
+        return {"blankID": normalized_blank_id, "available": False}
+
+    return {"blankID": normalized_blank_id, "available": True}
+
 
 
 @app.post("/api/register", response_model=RegisterResponse)
