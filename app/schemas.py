@@ -236,11 +236,13 @@ class EnvelopePollResponse(BaseModel):
 class ReceiptRequest(BaseModel):
     envelopeIDs: List[str]
     recipientBlankID: str
+    recipientDeviceID: str
 
     @field_validator("recipientBlankID")
     @classmethod
     def normalize_blank_id_field(cls, v: str) -> str:
         return normalize_blank_id(v)
+
 
 
 class ReceiptResponse(BaseModel):

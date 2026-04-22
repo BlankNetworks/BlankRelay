@@ -827,6 +827,7 @@ def flush_envelopes(db: Session = Depends(get_db)):
 @app.get("/api/envelopes/poll", response_model=EnvelopePollResponse)
 def poll_envelopes(
     recipientBlankID: str = Query(..., min_length=3, max_length=32),
+    recipientDeviceID: str = Query(..., min_length=1, max_length=255),
     request: Request = None,
     db: Session = Depends(get_db),
 ):
@@ -837,6 +838,7 @@ def poll_envelopes(
         db.query(MessageEnvelope)
         .filter(
             MessageEnvelope.recipient_blank_id == normalized_blank_id,
+            MessageEnvelope.recipient_device_id == recipientDeviceID,
             MessageEnvelope.is_delivered_or_processed == False,  # noqa: E712
         )
         .order_by(MessageEnvelope.timestamp.asc(), MessageEnvelope.created_at.asc())
@@ -867,6 +869,7 @@ def poll_envelopes(
     }
 
 
+
 @app.post("/api/envelopes/receipt", response_model=ReceiptResponse)
 def process_receipt(payload: ReceiptRequest, request: Request, db: Session = Depends(get_db)):
     get_active_user_or_404(db, payload.recipientBlankID)
@@ -875,13 +878,20 @@ def process_receipt(payload: ReceiptRequest, request: Request, db: Session = Dep
         db.query(MessageEnvelope)
         .filter(
             MessageEnvelope.recipient_blank_id == payload.recipientBlankID,
+            MessageEnvelope.recipient_device_id == payload.recipientDeviceID,
             MessageEnvelope.envelope_id.in_(payload.envelopeIDs),
             MessageEnvelope.is_delivered_or_processed == False,  # noqa: E712
         )
         .all()
     )
+
     processed_count = len(matched)
     for row in matched:
         row.is_delivered_or_processed = True
+
     db.commit()
-    return {"success": True, "processedCount": processed_count, "message": "Receipts processed successfully"}
+    return {
+        "success": True,
+        "processedCount": processed_count,
+        "message": "Receipts processed successfully",
+    }
