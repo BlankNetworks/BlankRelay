@@ -7,6 +7,22 @@ def normalize_blank_id(value: str) -> str:
     return value.strip().lower()
 
 
+class UserProfileResponse(BaseModel):
+    success: bool
+    blankID: str
+    displayName: str
+    profilePhotoURL: str | None = None
+    profileThumbURL: str | None = None
+    profilePhotoVersion: str | None = None
+
+
+class ProfilePhotoUploadResponse(BaseModel):
+    success: bool
+    blankID: str
+    profilePhotoURL: str
+    message: str
+
+
 class DeviceLinkRequestCreate(BaseModel):
     blankID: str
     primaryDeviceID: str

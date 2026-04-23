@@ -16,6 +16,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    profile_photo_version = Column(String, nullable=True)
+    profile_photo_path = Column(String, nullable=True)
+    profile_thumb_path = Column(String, nullable=True)
 
     claimed_identity_key_base64: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_identity_signing_public_key_base64: Mapped[str | None] = mapped_column(Text, nullable=True)

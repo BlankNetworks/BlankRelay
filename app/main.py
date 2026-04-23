@@ -2,6 +2,12 @@ import base64
 import binascii
 import json
 import secrets
+
+import os
+import uuid
+from fastapi import File, UploadFile
+from fastapi.responses import FileResponse
+
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from app.relay_forward_client import forward_post, forward_get
@@ -42,6 +48,8 @@ from .config import (
 from .database import Base, engine, get_db
 from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice
 from .schemas import (
+    UserProfileResponse,
+    ProfilePhotoUploadResponse,
     DeleteUserResponse,
     DeviceLinkCompleteRequest,
     DeviceLinkCompleteResponse,
@@ -258,6 +266,100 @@ def check_blank_id(blankID: str = Query(..., min_length=3, max_length=32), db: S
         return {"blankID": normalized_blank_id, "available": False}
 
     return {"blankID": normalized_blank_id, "available": True}
+
+
+@app.post("/api/profile/photo", response_model=ProfilePhotoUploadResponse)
+async def upload_profile_photo(
+    blankID: str = Query(..., min_length=3, max_length=32),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    normalized_blank_id = blankID.strip().lower()
+    user = get_active_user_or_404(db, normalized_blank_id)
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    uploads_dir = os.path.join(os.path.dirname(__file__), "..", "uploads", "profile_photos")
+    uploads_dir = os.path.abspath(uploads_dir)
+    os.makedirs(uploads_dir, exist_ok=True)
+
+    filename = f"{normalized_blank_id}_{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(uploads_dir, filename)
+
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    user.profile_photo_path = file_path
+    user.profile_photo_version = uuid.uuid4().hex
+    db.commit()
+
+    return {
+        "success": True,
+        "blankID": normalized_blank_id,
+        "profilePhotoURL": f"/api/profile/{normalized_blank_id}/photo",
+        "message": "Profile photo uploaded successfully",
+    }
+
+
+@app.get("/api/profile/{blank_id}", response_model=UserProfileResponse)
+def get_user_profile(blank_id: str, db: Session = Depends(get_db)):
+    normalized_blank_id = blank_id.strip().lower()
+
+    lookup = lookup_blankid(normalized_blank_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_get(f"{owner}/api/profile/{normalized_blank_id}")
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    user = get_active_user_or_404(db, normalized_blank_id)
+
+    return {
+        "success": True,
+        "blankID": user.blank_id,
+        "displayName": user.display_name,
+        "profilePhotoURL": f"/api/profile/{user.blank_id}/photo" if user.profile_photo_path else None,
+        "profileThumbURL": None,
+        "profilePhotoVersion": user.profile_photo_version,
+    }
+
+
+
+@app.get("/api/profile/{blank_id}/photo")
+def get_user_profile_photo(blank_id: str, db: Session = Depends(get_db)):
+    normalized_blank_id = blank_id.strip().lower()
+
+    lookup = lookup_blankid(normalized_blank_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_get(f"{owner}/api/profile/{normalized_blank_id}")
+        if not status_code:
+            raise HTTPException(status_code=502, detail="Forward failed")
+        raise HTTPException(status_code=400, detail="Use profilePhotoURL from owning relay profile response")
+
+    user = get_active_user_or_404(db, normalized_blank_id)
+
+    if not user.profile_photo_path:
+        raise HTTPException(status_code=404, detail="Profile photo not found")
+
+    return FileResponse(user.profile_photo_path)
+
 
 
 @app.post("/api/devices/link/request", response_model=DeviceLinkRequestResponse)
