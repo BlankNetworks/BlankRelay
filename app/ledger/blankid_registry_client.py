@@ -6,6 +6,23 @@ import requests
 from app.config import BLANKID_REGISTRY_URL
 from app.ledger.local_registry_index import get_blankid
 
+
+def reserve_blankid(blank_id: str, relay_domain: str) -> dict:
+    try:
+        response = requests.post(
+            "https://blankcoms.duckdns.org/ledger/ids/reserve",
+            json={
+                "blankID": blank_id,
+                "relayDomain": relay_domain,
+            },
+            timeout=5,
+        )
+        if response.status_code == 200:
+            return response.json()
+        return {"success": False, "detail": response.text}
+    except Exception:
+        return {"success": False, "detail": "reservation failed"}
+
 def get_blankid_registry_base_url() -> str:
     return (BLANKID_REGISTRY_URL or "").rstrip("/")
 

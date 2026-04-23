@@ -30,6 +30,18 @@ def build_claim_hash(
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class BlankIDReserveRequest(BaseModel):
+    blankID: str
+    relayDomain: str
+
+
+class BlankIDReserveResponse(BaseModel):
+    success: bool
+    blankID: str
+    relayDomain: str
+    message: str
+
+
 class LedgerClaimStatusResponse(BaseModel):
     blankID: str
     status: str

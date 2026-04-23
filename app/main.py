@@ -7,7 +7,6 @@ import os
 import uuid
 from fastapi import File, UploadFile
 from fastapi.responses import FileResponse
-
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from app.relay_forward_client import forward_post, forward_get
@@ -21,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.startup_checks import run_startup_checks
 from app.config import RELAY_DOMAIN
 from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
-from app.ledger.blankid_registry_client import lookup_blankid, publish_blankid
+from app.ledger.blankid_registry_client import lookup_blankid, publish_blankid, reserve_blankid
 from app.ledger.commit_service import start_commit_loop
 from app.ledger.discovery_service import start_discovery_loop
 from app.ledger.dynamic_peers import get_dynamic_peers
@@ -59,6 +58,8 @@ from .schemas import (
     EnvelopeResponseItem,
     EnvelopeSendRequest,
     EnvelopeSendResponse,
+    EnvelopeBatchSendRequest,
+    EnvelopeBatchSendResponse,
     IDCheckResponse,
     LoginRequest,
     LoginResponse,
@@ -656,6 +657,13 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
                 detail="Blank ID is already taken",
             )
 
+        reservation = reserve_blankid(payload.blankID, RELAY_DOMAIN)
+        if not reservation.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Blank ID could not be reserved globally",
+            )
+
         backup_lookup = lookup_blankid(payload.blankID)
         if backup_lookup.get("found"):
             raise HTTPException(
@@ -1030,6 +1038,69 @@ def relay_forward_envelope(request: EnvelopeSendRequest, db: Session = Depends(g
     }
 
 
+@app.post("/api/envelopes/send-batch", response_model=EnvelopeBatchSendResponse)
+def send_envelope_batch(payload: EnvelopeBatchSendRequest, request: Request, db: Session = Depends(get_db)):
+    if not payload.envelopes:
+        raise HTTPException(status_code=400, detail="No envelopes provided")
+
+    created_ids = []
+
+    for env in payload.envelopes:
+        recipient_id = env.recipientBlankID.strip().lower()
+
+        lookup = lookup_blankid(recipient_id)
+        if not lookup.get("found"):
+            raise HTTPException(status_code=404, detail=f"Recipient BlankID not found: {recipient_id}")
+
+        owner = lookup["record"]["relayDomain"]
+        if not owner.startswith("http"):
+            owner = f"https://{owner}"
+
+        envelope = MessageEnvelope(
+            envelope_id=env.id,
+            type=env.type,
+            sender_blank_id=env.senderBlankID,
+            sender_device_id=env.senderDeviceID,
+            recipient_blank_id=recipient_id,
+            recipient_device_id=env.recipientDeviceID,
+            conversation_id=env.conversationID,
+            timestamp=env.timestamp,
+            ratchet_header_type=env.ratchetHeaderType,
+            ratchet_header_base64=env.ratchetHeaderBase64,
+            nonce_base64=env.nonceBase64,
+            ciphertext_base64=env.ciphertextBase64,
+            protocol_version=env.protocolVersion,
+            is_delivered_or_processed=False,
+            delivered_at=None,
+            processed_at=None,
+        )
+
+        # forward remote recipient devices one-by-one
+        if RELAY_DOMAIN not in owner:
+            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.model_dump()})
+            if not status_code:
+                raise HTTPException(status_code=502, detail=f"Forward failed for {recipient_id}")
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=data.get("detail", "Forwarded send failed"))
+            created_ids.append(env.id)
+            continue
+
+        # local store
+        existing = db.query(MessageEnvelope).filter(MessageEnvelope.envelope_id == env.id).first()
+        if existing is None:
+            db.add(envelope)
+        created_ids.append(env.id)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "envelopeIDs": created_ids,
+        "processedCount": len(created_ids),
+        "message": "Batch envelopes processed successfully",
+    }
+
+
 @app.post("/api/envelopes/send")
 def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
     envelope = request.envelope
@@ -1149,18 +1220,25 @@ def process_receipt(payload: ReceiptRequest, request: Request, db: Session = Dep
             MessageEnvelope.recipient_blank_id == payload.recipientBlankID,
             MessageEnvelope.recipient_device_id == payload.recipientDeviceID,
             MessageEnvelope.envelope_id.in_(payload.envelopeIDs),
-            MessageEnvelope.is_delivered_or_processed == False,  # noqa: E712
         )
         .all()
     )
 
-    processed_count = len(matched)
+    processed_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     for row in matched:
-        row.is_delivered_or_processed = True
+        if not row.is_delivered_or_processed:
+            row.is_delivered_or_processed = True
+            row.delivered_at = now_iso
+            row.processed_at = now_iso
+            processed_count += 1
 
     db.commit()
+
     return {
         "success": True,
         "processedCount": processed_count,
         "message": "Receipts processed successfully",
     }
+

@@ -1,18 +1,15 @@
 from datetime import datetime, timezone
 
-from app.ledger.join_state import get_join_mode
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+
+from app.db.ledger_database import LedgerSessionLocal, get_ledger_db
+from app.ledger.join_state import get_join_mode
+from app.ledger.models import BlankIDReservation, ConsensusState, OwnershipIndex, PendingClaim
 from app.ledger.peer_forwarding import forward_claim_to_peers
-from app.ledger.validator_config import THIS_RELAY_DOMAIN
-
-from app.ledger.sync_state import is_relay_syncing
-from app.ledger.validator_config import BLOCK_CLIENT_WRITES_WHILE_SYNCING
-
-from app.db.ledger_database import get_ledger_db
-from app.ledger.models import ConsensusState, OwnershipIndex, PendingClaim
 from app.ledger.schemas import (
+    BlankIDReserveRequest,
+    BlankIDReserveResponse,
     LedgerClaimStatusResponse,
     LedgerClaimSubmitRequest,
     LedgerClaimSubmitResponse,
@@ -20,6 +17,12 @@ from app.ledger.schemas import (
     LedgerStatusResponse,
     build_claim_hash,
 )
+from app.ledger.sync_state import is_relay_syncing
+from app.ledger.validator_config import (
+    BLOCK_CLIENT_WRITES_WHILE_SYNCING,
+    THIS_RELAY_DOMAIN,
+)
+
 
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
@@ -156,3 +159,36 @@ def get_claim_status(clientClaimHash: str, db: Session = Depends(get_ledger_db))
         }
 
     raise HTTPException(status_code=404, detail="claim not found")
+
+@router.post("/ids/reserve", response_model=BlankIDReserveResponse)
+def reserve_blank_id(payload: BlankIDReserveRequest):
+    db = LedgerSessionLocal()
+    try:
+        normalized_blank_id = payload.blankID.strip().lower()
+
+        existing = (
+            db.query(BlankIDReservation)
+            .filter(BlankIDReservation.blank_id == normalized_blank_id)
+            .first()
+        )
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="BlankID already reserved")
+
+        row = BlankIDReservation(
+            blank_id=normalized_blank_id,
+            relay_domain=payload.relayDomain,
+            status="reserved",
+            reserved_at=datetime.now(timezone.utc).isoformat(),
+        )
+        db.add(row)
+        db.commit()
+
+        return {
+            "success": True,
+            "blankID": normalized_blank_id,
+            "relayDomain": payload.relayDomain,
+            "message": "BlankID reserved successfully",
+        }
+    finally:
+        db.close()
+

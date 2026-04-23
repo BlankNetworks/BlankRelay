@@ -1,8 +1,17 @@
-from sqlalchemy import Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.ledger_database import LedgerBase
 
+
+class BlankIDReservation(LedgerBase):
+    __tablename__ = "blankid_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    blank_id = Column(String, unique=True, index=True, nullable=False)
+    relay_domain = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="reserved")
+    reserved_at = Column(String, nullable=False)
 
 class LedgerBlock(LedgerBase):
     __tablename__ = "ledger_blocks"
