@@ -6,7 +6,6 @@ from typing import List, Optional
 def normalize_blank_id(value: str) -> str:
     return value.strip().lower()
 
-
 class PresenceHeartbeatRequest(BaseModel):
     blankID: str
     deviceID: str
@@ -248,6 +247,17 @@ class EnvelopeSendRequest(BaseModel):
 class EnvelopeSendResponse(BaseModel):
     success: bool
     envelopeID: str
+    message: str
+
+
+class EnvelopeBatchSendRequest(BaseModel):
+    envelopes: List[EnvelopePayload]
+
+
+class EnvelopeBatchSendResponse(BaseModel):
+    success: bool
+    envelopeIDs: List[str]
+    processedCount: int
     message: str
 
 
