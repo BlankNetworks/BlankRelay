@@ -110,7 +110,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def _is_recent_presence(iso_value: str | None, seconds: int = 30) -> bool:
+def _is_recent_presence(iso_value: str | None, seconds: int = 60) -> bool:
     if not iso_value:
         return False
     try:
