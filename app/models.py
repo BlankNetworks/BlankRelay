@@ -29,6 +29,7 @@ class User(Base):
 class UserDevice(Base):
     __tablename__ = "user_devices"
 
+    last_seen_at = Column(String, nullable=True)
     id = Column(Integer, primary_key=True, index=True)
     blank_id = Column(String, index=True, nullable=False)
     device_id = Column(String, unique=True, index=True, nullable=False)

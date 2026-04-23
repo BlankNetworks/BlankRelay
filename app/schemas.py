@@ -7,6 +7,30 @@ def normalize_blank_id(value: str) -> str:
     return value.strip().lower()
 
 
+class PresenceHeartbeatRequest(BaseModel):
+    blankID: str
+    deviceID: str
+
+    @field_validator("blankID")
+    @classmethod
+    def normalize_blank_id_field(cls, v: str) -> str:
+        return normalize_blank_id(v)
+
+
+class PresenceDeviceOut(BaseModel):
+    deviceID: str
+    isOnline: bool
+    lastSeenAt: str | None = None
+
+
+class PresenceResponse(BaseModel):
+    success: bool
+    blankID: str
+    isOnline: bool
+    lastSeenAt: str | None = None
+    devices: list[PresenceDeviceOut]
+
+
 class UserProfileResponse(BaseModel):
     success: bool
     blankID: str

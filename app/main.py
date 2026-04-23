@@ -62,6 +62,9 @@ from .schemas import (
     IDCheckResponse,
     LoginRequest,
     LoginResponse,
+    PresenceHeartbeatRequest,
+    PresenceDeviceOut,
+    PresenceResponse,
     PrekeyBundleFetchResponse,
     PrekeyBundleResponseBundle,
     PrekeyBundleUploadRequest,
@@ -106,6 +109,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def _is_recent_presence(iso_value: str | None, seconds: int = 30) -> bool:
+    if not iso_value:
+        return False
+    try:
+        seen = datetime.fromisoformat(iso_value.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        return (now - seen).total_seconds() <= seconds
+    except Exception:
+        return False
 
 def build_registration_claim_hash(
     blank_id: str,
@@ -225,6 +238,100 @@ def get_active_user_or_404(db: Session, blank_id: str) -> User:
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+@app.post("/api/presence/heartbeat")
+def presence_heartbeat(payload: PresenceHeartbeatRequest, db: Session = Depends(get_db)):
+    normalized_blank_id = payload.blankID.strip().lower()
+
+    lookup = lookup_blankid(normalized_blank_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_post(f"{owner}/api/presence/heartbeat", payload.dict())
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    device = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == normalized_blank_id,
+            UserDevice.device_id == payload.deviceID,
+            UserDevice.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.last_seen_at = datetime.now(timezone.utc).isoformat()
+    db.commit()
+
+    return {
+        "success": True,
+        "blankID": normalized_blank_id,
+        "deviceID": payload.deviceID,
+        "lastSeenAt": device.last_seen_at,
+    }
+
+
+@app.get("/api/presence/{blank_id}", response_model=PresenceResponse)
+def get_presence(blank_id: str, db: Session = Depends(get_db)):
+    normalized_blank_id = blank_id.strip().lower()
+
+    lookup = lookup_blankid(normalized_blank_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_get(f"{owner}/api/presence/{normalized_blank_id}")
+        if status_code:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    rows = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == normalized_blank_id,
+            UserDevice.is_active == True,  # noqa: E712
+        )
+        .all()
+    )
+
+    devices = []
+    newest_seen = None
+    any_online = False
+
+    for row in rows:
+        online = _is_recent_presence(row.last_seen_at, 30)
+        if online:
+            any_online = True
+
+        if row.last_seen_at and (newest_seen is None or row.last_seen_at > newest_seen):
+            newest_seen = row.last_seen_at
+
+        devices.append({
+            "deviceID": row.device_id,
+            "isOnline": online,
+            "lastSeenAt": row.last_seen_at,
+        })
+
+    return {
+        "success": True,
+        "blankID": normalized_blank_id,
+        "isOnline": any_online,
+        "lastSeenAt": newest_seen,
+        "devices": devices,
+    }
 
 @app.get("/relay/health")
 def relay_health():
