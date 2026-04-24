@@ -16,7 +16,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-
 from app.startup_checks import run_startup_checks
 from app.config import RELAY_DOMAIN
 from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
@@ -29,6 +28,7 @@ from app.ledger.local_registry_index import load_id_index, load_relay_index
 from app.ledger.models import ConsensusState, OwnershipIndex, PendingClaim
 from app.ledger.peer_scoring import get_peer_scores, start_peer_scoring
 from app.ledger.registry_heartbeat import start_registry_heartbeat
+from app.ledger.registry_client import registry_status
 from app.ledger.relay_health_state import get_health_state
 from app.ledger.routes_public import router as ledger_public_router
 from app.ledger.routes_validator import router as ledger_validator_router
@@ -333,6 +333,12 @@ def get_presence(blank_id: str, db: Session = Depends(get_db)):
         "lastSeenAt": newest_seen,
         "devices": devices,
     }
+
+
+@app.get("/relay/registry-status")
+def relay_registry_status():
+    return registry_status()
+
 
 @app.get("/relay/health")
 def relay_health():
