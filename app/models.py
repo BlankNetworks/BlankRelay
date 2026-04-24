@@ -120,3 +120,6 @@ class ForwardRetryQueue(Base):
     last_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(String, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+

@@ -1,12 +1,16 @@
 import json
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
 from app.database import SessionLocal
 from app.models import ForwardRetryQueue
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
 
 
 def enqueue_forward_retry(target_url: str, payload: dict):
@@ -16,9 +20,11 @@ def enqueue_forward_retry(target_url: str, payload: dict):
             target_url=target_url,
             payload_json=json.dumps(payload),
             attempt_count=0,
+            retry_count=0,
             max_attempts=10,
             status="pending",
-            updated_at=datetime.now(timezone.utc).isoformat(),
+            next_attempt_at=now_utc() + timedelta(seconds=10),
+            updated_at=now_utc().isoformat(),
         )
         db.add(row)
         db.commit()
@@ -31,7 +37,10 @@ def process_retry_once():
     try:
         rows = (
             db.query(ForwardRetryQueue)
-            .filter(ForwardRetryQueue.status == "pending")
+            .filter(
+                ForwardRetryQueue.status == "pending",
+                ForwardRetryQueue.next_attempt_at <= now_utc(),
+            )
             .order_by(ForwardRetryQueue.created_at.asc())
             .limit(25)
             .all()
@@ -44,16 +53,21 @@ def process_retry_once():
 
                 if 200 <= r.status_code < 300:
                     row.status = "sent"
-                    row.updated_at = datetime.now(timezone.utc).isoformat()
+                    row.updated_at = now_utc().isoformat()
                     continue
 
                 row.attempt_count += 1
+                row.retry_count += 1
                 row.last_error = f"{r.status_code}: {r.text[:300]}"
+
             except Exception as e:
                 row.attempt_count += 1
+                row.retry_count += 1
                 row.last_error = str(e)
 
-            row.updated_at = datetime.now(timezone.utc).isoformat()
+            delay = min(300, 2 ** row.retry_count)
+            row.next_attempt_at = now_utc() + timedelta(seconds=delay)
+            row.updated_at = now_utc().isoformat()
 
             if row.attempt_count >= row.max_attempts:
                 row.status = "dead"
@@ -69,7 +83,7 @@ def retry_loop():
             process_retry_once()
         except Exception:
             pass
-        time.sleep(15)
+        time.sleep(5)
 
 
 def start_forward_retry_worker():
