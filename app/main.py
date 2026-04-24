@@ -29,6 +29,7 @@ from app.ledger.models import ConsensusState, OwnershipIndex, PendingClaim
 from app.ledger.peer_scoring import get_peer_scores, start_peer_scoring
 from app.ledger.registry_heartbeat import start_registry_heartbeat
 from app.ledger.registry_client import registry_status
+from app.ledger.cache_health import cache_health
 from app.ledger.relay_health_state import get_health_state
 from app.ledger.routes_public import router as ledger_public_router
 from app.ledger.routes_validator import router as ledger_validator_router
@@ -350,6 +351,11 @@ def relay_health():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/relay/cache-health")
+def relay_cache_health():
+    return cache_health()
 
 
 @app.get("/api/ids/check", response_model=IDCheckResponse)
