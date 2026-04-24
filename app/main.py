@@ -360,6 +360,34 @@ def relay_cache_health():
     return cache_health()
 
 
+@app.get("/relay/dead-letter")
+def relay_dead_letter(db: Session = Depends(get_db)):
+    rows = (
+        db.query(ForwardRetryQueue)
+        .filter(ForwardRetryQueue.status == "dead")
+        .order_by(ForwardRetryQueue.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    return {
+        "success": True,
+        "count": len(rows),
+        "items": [
+            {
+                "id": row.id,
+                "targetURL": row.target_url,
+                "attemptCount": row.attempt_count,
+                "retryCount": row.retry_count,
+                "lastError": row.last_error,
+                "createdAt": str(row.created_at),
+                "updatedAt": row.updated_at,
+            }
+            for row in rows
+        ],
+    }
+
+
 @app.get("/api/ids/check", response_model=IDCheckResponse)
 def check_blank_id(blankID: str = Query(..., min_length=3, max_length=32), db: Session = Depends(get_db)):
     normalized_blank_id = blankID.strip().lower()
