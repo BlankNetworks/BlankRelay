@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.startup_checks import run_startup_checks
 from app.config import RELAY_DOMAIN
 from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
+from app.forward_retry_worker import enqueue_forward_retry, start_forward_retry_worker
 from app.ledger.blankid_registry_client import lookup_blankid, publish_blankid, reserve_blankid
 from app.ledger.commit_service import start_commit_loop
 from app.ledger.discovery_service import start_discovery_loop
@@ -46,7 +47,7 @@ from .config import (
     EMAIL_DOMAIN,
 )
 from .database import Base, engine, get_db
-from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice
+from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice, ForwardRetryQueue
 from .schemas import (
     UserProfileResponse,
     ProfilePhotoUploadResponse,
@@ -169,6 +170,7 @@ def initialize_ledger_defaults():
     start_commit_loop()
     start_discovery_loop()
     start_peer_scoring()
+    start_forward_retry_worker()
     db = LedgerSessionLocal()
     try:
         defaults = {
@@ -1011,6 +1013,21 @@ def relay_peers():
         "peers": list(get_peer_scores().values())
     }
 
+
+@app.get("/relay/forward-queue")
+def relay_forward_queue(db: Session = Depends(get_db)):
+    pending = db.query(ForwardRetryQueue).filter(ForwardRetryQueue.status == "pending").count()
+    sent = db.query(ForwardRetryQueue).filter(ForwardRetryQueue.status == "sent").count()
+    dead = db.query(ForwardRetryQueue).filter(ForwardRetryQueue.status == "dead").count()
+
+    return {
+        "success": True,
+        "pending": pending,
+        "sent": sent,
+        "dead": dead,
+    }
+
+
 @app.post("/api/envelopes/relay-forward")
 def relay_forward_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
     envelope = request.envelope
@@ -1089,9 +1106,11 @@ def send_envelope_batch(payload: EnvelopeBatchSendRequest, request: Request, db:
 
         # forward remote recipient devices one-by-one
         if RELAY_DOMAIN not in owner:
-            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.model_dump()})
-            if not status_code:
-                raise HTTPException(status_code=502, detail=f"Forward failed for {recipient_id}")
+            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.dict()})
+        if not status_code:
+            enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.dict()})
+            created_ids.append(env.id)
+            continue
             if status_code >= 400:
                 raise HTTPException(status_code=status_code, detail=data.get("detail", "Forwarded send failed"))
             created_ids.append(env.id)

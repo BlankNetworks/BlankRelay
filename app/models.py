@@ -104,3 +104,19 @@ class MessageEnvelope(Base):
     protocol_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_delivered_or_processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    delivered_at = Column(String, nullable=True)
+    processed_at = Column(String, nullable=True)
+
+
+class ForwardRetryQueue(Base):
+    __tablename__ = "forward_retry_queue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    target_url = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    attempt_count = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=10, nullable=False)
+    status = Column(String, default="pending", nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(String, nullable=True)
