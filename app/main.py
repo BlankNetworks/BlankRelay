@@ -76,6 +76,8 @@ from .schemas import (
     ReceiptResponse,
     RegisterRequest,
     RegisterResponse,
+    SignalingSendRequest,
+    SignalingPollResponse,
     UserDeviceOut,
     UserDevicesResponse,
 )
@@ -282,6 +284,82 @@ def presence_heartbeat(payload: PresenceHeartbeatRequest, db: Session = Depends(
         "deviceID": payload.deviceID,
         "lastSeenAt": device.last_seen_at,
     }
+
+
+@app.post("/api/signaling/send")
+def send_call_signal(payload: SignalingSendRequest, db: Session = Depends(get_db)):
+    recipient_id = payload.recipientBlankID.strip().lower()
+
+    lookup = lookup_blankid(recipient_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="Recipient BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_post(f"{owner}/api/signaling/send", payload.dict())
+        if status_code and status_code < 400:
+            return data
+
+        enqueue_forward_retry(f"{owner}/api/signaling/send", payload.dict())
+        return {"success": True, "message": "Signal queued for retry"}
+
+    row = CallSignal(
+        call_id=payload.callID,
+        sender_blank_id=payload.senderBlankID,
+        sender_device_id=payload.senderDeviceID,
+        recipient_blank_id=recipient_id,
+        recipient_device_id=payload.recipientDeviceID,
+        signal_type=payload.signalType,
+        payload_json=json.dumps(payload.payload),
+        consumed=False,
+    )
+    db.add(row)
+    db.commit()
+
+    return {"success": True, "message": "Signal stored"}
+
+
+@app.get("/api/signaling/poll", response_model=SignalingPollResponse)
+def poll_call_signals(
+    recipientBlankID: str = Query(...),
+    recipientDeviceID: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    recipient_id = recipientBlankID.strip().lower()
+
+    rows = (
+        db.query(CallSignal)
+        .filter(
+            CallSignal.recipient_blank_id == recipient_id,
+            CallSignal.recipient_device_id == recipientDeviceID,
+            CallSignal.consumed == False,  # noqa: E712
+        )
+        .order_by(CallSignal.created_at.asc())
+        .limit(50)
+        .all()
+    )
+
+    signals = []
+    for row in rows:
+        signals.append({
+            "id": row.id,
+            "callID": row.call_id,
+            "senderBlankID": row.sender_blank_id,
+            "senderDeviceID": row.sender_device_id,
+            "recipientBlankID": row.recipient_blank_id,
+            "recipientDeviceID": row.recipient_device_id,
+            "signalType": row.signal_type,
+            "payload": json.loads(row.payload_json),
+            "createdAt": str(row.created_at),
+        })
+        row.consumed = True
+
+    db.commit()
+
+    return {"success": True, "signals": signals}
 
 
 @app.get("/api/presence/{blank_id}", response_model=PresenceResponse)
