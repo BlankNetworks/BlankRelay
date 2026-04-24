@@ -1104,15 +1104,20 @@ def send_envelope_batch(payload: EnvelopeBatchSendRequest, request: Request, db:
             processed_at=None,
         )
 
+
         # forward remote recipient devices one-by-one
         if RELAY_DOMAIN not in owner:
-            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.dict()})
-        if not status_code:
-            enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.dict()})
-            created_ids.append(env.id)
-            continue
+            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
+            if not status_code:
+                enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
+                created_ids.append(env.id)
+                continue
+
             if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=data.get("detail", "Forwarded send failed"))
+                enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
+                created_ids.append(env.id)
+                continue
+
             created_ids.append(env.id)
             continue
 
@@ -1177,9 +1182,23 @@ def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
     if not relay_domain:
         raise HTTPException(status_code=404, detail="Recipient relay not found")
 
-    forwarded = forward_envelope_to_relay(relay_domain, envelope.model_dump())
+
+    owner = relay_domain
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    forwarded = forward_envelope_to_relay(owner, envelope.model_dump(mode="json"))
     if not forwarded:
-        raise HTTPException(status_code=502, detail="Failed to forward envelope to recipient relay")
+        enqueue_forward_retry(
+            f"{owner}/api/envelopes/send",
+            {"envelope": envelope.model_dump(mode="json")}
+        )
+
+        return {
+            "success": True,
+            "envelopeID": envelope.id,
+            "message": "Recipient relay unavailable; envelope queued for retry",
+        }
 
     return {
         "success": True,
