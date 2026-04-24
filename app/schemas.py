@@ -6,6 +6,22 @@ from typing import List, Optional
 def normalize_blank_id(value: str) -> str:
     return value.strip().lower()
 
+
+class SignalingSendRequest(BaseModel):
+    senderBlankID: str
+    senderDeviceID: str
+    recipientBlankID: str
+    recipientDeviceID: str
+    callID: str
+    signalType: str
+    payload: dict
+
+
+class SignalingPollResponse(BaseModel):
+    success: bool
+    signals: list[dict]
+
+
 class PresenceHeartbeatRequest(BaseModel):
     blankID: str
     deviceID: str

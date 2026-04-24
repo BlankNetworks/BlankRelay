@@ -123,3 +123,17 @@ class ForwardRetryQueue(Base):
     retry_count = Column(Integer, default=0, nullable=False)
     next_attempt_at = Column(DateTime(timezone=True), nullable=True)
 
+
+class CallSignal(Base):
+    __tablename__ = "call_signals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    call_id = Column(String, index=True, nullable=False)
+    sender_blank_id = Column(String, index=True, nullable=False)
+    sender_device_id = Column(String, nullable=False)
+    recipient_blank_id = Column(String, index=True, nullable=False)
+    recipient_device_id = Column(String, index=True, nullable=False)
+    signal_type = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    consumed = Column(Boolean, default=False)

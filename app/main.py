@@ -47,7 +47,7 @@ from .config import (
     EMAIL_DOMAIN,
 )
 from .database import Base, engine, get_db
-from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice, ForwardRetryQueue
+from .models import MessageEnvelope, OneTimePrekey, PrekeyBundle, User, UserDevice, ForwardRetryQueue, CallSignal
 from .schemas import (
     UserProfileResponse,
     ProfilePhotoUploadResponse,
@@ -1240,6 +1240,30 @@ def flush_envelopes(db: Session = Depends(get_db)):
     db.query(MessageEnvelope).delete()
     db.commit()
     return {"status": "flushed"}
+
+
+@app.post("/relay/forward-queue/flush")
+def flush_forward_queue(db: Session = Depends(get_db)):
+    db.query(ForwardRetryQueue).delete()
+    db.commit()
+    return {"success": True, "status": "forward queue flushed"}
+
+
+@app.post("/relay/dead-letter/flush")
+def flush_dead_letter(db: Session = Depends(get_db)):
+    deleted = (
+        db.query(ForwardRetryQueue)
+        .filter(ForwardRetryQueue.status == "dead")
+        .delete()
+    )
+    db.commit()
+    return {"success": True, "deleted": deleted, "status": "dead letters flushed"}
+
+@app.post("/api/signaling/flush")
+def flush_call_signals(db: Session = Depends(get_db)):
+    db.query(CallSignal).delete()
+    db.commit()
+    return {"success": True, "status": "call signals flushed"}
 
 
 @app.get("/api/envelopes/poll", response_model=EnvelopePollResponse)
