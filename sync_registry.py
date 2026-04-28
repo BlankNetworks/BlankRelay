@@ -36,14 +36,34 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 PRIVATE_KEY = BASE / "registry_keys" / "registry_private_key.pem"
+SELF_HEAL_MARKER = BASE / ".registry_self_heal_running"
 
-try:
+
+def run_signature_check():
     if PRIVATE_KEY.exists():
         subprocess.run(["python3", str(BASE / "sign_registry.py")], check=True)
         print("registry signed")
     else:
         subprocess.run(["python3", str(BASE / "verify_registry.py")], check=True)
         print("registry verified")
+
+
+try:
+    run_signature_check()
 except Exception as e:
     print(f"registry signature check failed: {e}")
-    raise
+
+    if PRIVATE_KEY.exists():
+        print("source relay re-signing registry")
+        run_signature_check()
+    else:
+        if SELF_HEAL_MARKER.exists():
+            raise RuntimeError("registry self-heal failed after retry")
+
+        try:
+            SELF_HEAL_MARKER.write_text("1", encoding="utf-8")
+            print("tamper detected; re-syncing from source of truth")
+            subprocess.run(["python3", str(BASE / "sync_registry.py")], check=True)
+            run_signature_check()
+        finally:
+            SELF_HEAL_MARKER.unlink(missing_ok=True)
