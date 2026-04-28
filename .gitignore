@@ -11,3 +11,4 @@ identity_ledger.db
 registry/
 *.log
 update_blankrelay.sh
+registry_keys/registry_private_key.pem
