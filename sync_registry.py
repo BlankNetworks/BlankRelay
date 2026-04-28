@@ -30,3 +30,20 @@ if r.status_code == 200:
     chunk_write(ids, f"{BASE}/ids", "blankIDs")
 
 print("sync complete")
+
+import subprocess
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+PRIVATE_KEY = BASE / "registry_keys" / "registry_private_key.pem"
+
+try:
+    if PRIVATE_KEY.exists():
+        subprocess.run(["python3", str(BASE / "sign_registry.py")], check=True)
+        print("registry signed")
+    else:
+        subprocess.run(["python3", str(BASE / "verify_registry.py")], check=True)
+        print("registry verified")
+except Exception as e:
+    print(f"registry signature check failed: {e}")
+    raise
