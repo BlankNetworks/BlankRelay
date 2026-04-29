@@ -38,6 +38,9 @@ from app.ledger.sync_service import start_sync_checker
 from app.ledger.sync_state import is_relay_syncing
 from app.ledger.validator_config import BLOCK_CLIENT_WRITES_WHILE_SYNCING, IS_JOIN_MODE
 from app.relay_forward_client import forward_envelope_to_relay
+from .models import UserUpdate
+from .schemas import UpdatePostRequest, UpdateDeleteRequest, UpdatesResponse
+
 
 from .config import (
     ADMIN_DELETE_TOKEN,
@@ -244,6 +247,108 @@ def get_active_user_or_404(db: Session, blank_id: str) -> User:
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+@app.post("/api/updates/post")
+def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
+    owner_id = payload.ownerBlankID.strip().lower()
+
+    lookup = lookup_blankid(owner_id)
+    if not lookup.get("found"):
+        raise HTTPException(status_code=404, detail="BlankID not found")
+
+    owner = lookup["record"]["relayDomain"]
+    if not owner.startswith("http"):
+        owner = f"https://{owner}"
+
+    if RELAY_DOMAIN not in owner:
+        status_code, data = forward_post(f"{owner}/api/updates/post", payload.model_dump(mode="json"))
+        if status_code and status_code < 400:
+            return data
+        raise HTTPException(status_code=502, detail="Forward failed")
+
+    row = UserUpdate(
+        id=uuid.uuid4().hex,
+        owner_blank_id=owner_id,
+        owner_display_name=payload.ownerDisplayName,
+        caption=payload.caption,
+        image_base64=payload.imageBase64,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        is_deleted=False,
+    )
+
+    db.add(row)
+    db.commit()
+
+    return {
+        "success": True,
+        "update": {
+            "id": row.id,
+            "ownerBlankID": row.owner_blank_id,
+            "ownerDisplayName": row.owner_display_name,
+            "caption": row.caption,
+            "imageBase64": row.image_base64,
+            "createdAt": row.created_at,
+        },
+    }
+
+
+@app.get("/api/updates/{blank_id}", response_model=UpdatesResponse)
+def get_updates(blank_id: str, db: Session = Depends(get_db)):
+    owner_id = blank_id.strip().lower()
+
+    lookup = lookup_blankid(owner_id)
+    if lookup.get("found"):
+        owner = lookup["record"]["relayDomain"]
+        if not owner.startswith("http"):
+            owner = f"https://{owner}"
+
+        if RELAY_DOMAIN not in owner:
+            status_code, data = forward_get(f"{owner}/api/updates/{owner_id}")
+            if status_code and status_code < 400:
+                return data
+            raise HTTPException(status_code=502, detail="Forward failed")
+
+    rows = (
+        db.query(UserUpdate)
+        .filter(
+            UserUpdate.owner_blank_id == owner_id,
+            UserUpdate.is_deleted == False,  # noqa: E712
+        )
+        .order_by(UserUpdate.created_at.desc())
+        .all()
+    )
+
+    return {
+        "success": True,
+        "updates": [
+            {
+                "id": row.id,
+                "ownerBlankID": row.owner_blank_id,
+                "ownerDisplayName": row.owner_display_name,
+                "caption": row.caption,
+                "imageBase64": row.image_base64,
+                "createdAt": row.created_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.delete("/api/updates/{update_id}")
+def delete_update(update_id: str, payload: UpdateDeleteRequest, db: Session = Depends(get_db)):
+    owner_id = payload.ownerBlankID.strip().lower()
+
+    row = db.query(UserUpdate).filter(UserUpdate.id == update_id).first()
+    if row is None or row.is_deleted:
+        raise HTTPException(status_code=404, detail="Update not found")
+
+    if row.owner_blank_id != owner_id:
+        raise HTTPException(status_code=403, detail="Only owner can delete update")
+
+    row.is_deleted = True
+    db.commit()
+
+    return {"success": True, "deleted": True}
 
 @app.post("/api/presence/heartbeat")
 def presence_heartbeat(payload: PresenceHeartbeatRequest, db: Session = Depends(get_db)):

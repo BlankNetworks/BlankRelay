@@ -315,3 +315,27 @@ class ReceiptResponse(BaseModel):
     success: bool
     processedCount: int
     message: str
+
+class UpdatePostRequest(BaseModel):
+    ownerBlankID: str
+    ownerDisplayName: str
+    caption: str | None = None
+    imageBase64: str
+
+
+class UpdateDeleteRequest(BaseModel):
+    ownerBlankID: str
+
+
+class UpdateItem(BaseModel):
+    id: str
+    ownerBlankID: str
+    ownerDisplayName: str
+    caption: str | None = None
+    imageBase64: str
+    createdAt: str
+
+
+class UpdatesResponse(BaseModel):
+    success: bool
+    updates: list[UpdateItem]

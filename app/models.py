@@ -137,3 +137,14 @@ class CallSignal(Base):
     payload_json = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     consumed = Column(Boolean, default=False)
+
+class UserUpdate(Base):
+    __tablename__ = "updates"
+
+    id = Column(String, primary_key=True, index=True)
+    owner_blank_id = Column(String, index=True, nullable=False)
+    owner_display_name = Column(String, nullable=False)
+    caption = Column(Text, nullable=True)
+    image_base64 = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)
+    is_deleted = Column(Boolean, default=False)
