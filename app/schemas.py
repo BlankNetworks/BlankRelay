@@ -346,3 +346,20 @@ class UpdateItem(BaseModel):
 class UpdatesResponse(BaseModel):
     success: bool
     updates: list[UpdateItem]
+
+
+class DeviceIdentityRecoverRequest(BaseModel):
+    blankID: str
+    password: str
+    newDeviceID: str
+    deviceLabel: str = "Recovered Device"
+    identityKeyBase64: str
+    identitySigningPublicKeyBase64: str
+
+
+class DeviceIdentityRecoverResponse(BaseModel):
+    success: bool
+    blankID: str
+    deviceID: str
+    message: str
+    requiresPrekeyUpload: bool

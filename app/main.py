@@ -59,6 +59,8 @@ from .schemas import (
     DeviceLinkCompleteResponse,
     DeviceLinkRequestCreate,
     DeviceLinkRequestResponse,
+    DeviceIdentityRecoverRequest,
+    DeviceIdentityRecoverResponse,
     EnvelopePollResponse,
     EnvelopeResponseItem,
     EnvelopeSendRequest,
@@ -296,6 +298,71 @@ def get_active_user_or_404(db: Session, blank_id: str) -> User:
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+@app.post("/api/identity/recover-device", response_model=DeviceIdentityRecoverResponse)
+def recover_device_identity(payload: DeviceIdentityRecoverRequest, db: Session = Depends(get_db)):
+    normalized_blank_id = payload.blankID.strip().lower()
+
+    user = (
+        db.query(User)
+        .filter(
+            User.blank_id == normalized_blank_id,
+            User.is_deleted == False,  # noqa: E712
+        )
+        .first()
+    )
+
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # deactivate old devices
+    old_devices = (
+        db.query(UserDevice)
+        .filter(UserDevice.blank_id == normalized_blank_id)
+        .all()
+    )
+
+    for device in old_devices:
+        device.is_primary = False
+        device.is_active = False
+
+    # clear all old prekeys for this BlankID
+    bundles = (
+        db.query(PrekeyBundle)
+        .filter(PrekeyBundle.blank_id == normalized_blank_id)
+        .all()
+    )
+
+    for bundle in bundles:
+        db.query(OneTimePrekey).filter(OneTimePrekey.bundle_id == bundle.id).delete()
+
+    db.query(PrekeyBundle).filter(PrekeyBundle.blank_id == normalized_blank_id).delete()
+
+    new_device = UserDevice(
+        blank_id=normalized_blank_id,
+        device_id=payload.newDeviceID,
+        device_label=payload.deviceLabel,
+        identity_key_base64=payload.identityKeyBase64,
+        identity_signing_public_key_base64=payload.identitySigningPublicKeyBase64,
+        is_primary=True,
+        is_active=True,
+    )
+
+    db.add(new_device)
+    db.commit()
+
+    return {
+        "success": True,
+        "blankID": normalized_blank_id,
+        "deviceID": payload.newDeviceID,
+        "message": "Primary device identity recovered successfully. Fresh prekey upload required.",
+        "requiresPrekeyUpload": True,
+    }
+
 
 @app.post("/api/updates/post")
 def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
