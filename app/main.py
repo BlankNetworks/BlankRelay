@@ -118,6 +118,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+MAX_UPDATE_IMAGE_BASE64_BYTES = 8 * 1024 * 1024
+MAX_UPDATE_CAPTION_CHARS = 500
+
+
+def verify_update_device_signature(
+    db: Session,
+    blank_id: str,
+    device_id: str,
+    action: str,
+    update_id: str,
+    request_timestamp: str,
+    signature_base64: str,
+):
+    normalized_blank_id = blank_id.strip().lower()
+
+    device = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == normalized_blank_id,
+            UserDevice.device_id == device_id,
+            UserDevice.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+
+    if device is None:
+        raise HTTPException(status_code=403, detail="Device not authorized")
+
+    try:
+        public_bytes = base64.b64decode(device.identity_signing_public_key_base64)
+        signature = base64.b64decode(signature_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid signature encoding")
+
+    message = f"{action}:{normalized_blank_id}:{device_id}:{update_id}:{request_timestamp}".encode("utf-8")
+
+    try:
+        if len(public_bytes) == 65 and public_bytes[0] == 4:
+            public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), public_bytes)
+        else:
+            from cryptography.hazmat.primitives import serialization
+            public_key = serialization.load_der_public_key(public_bytes)
+
+        public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature:
+        raise HTTPException(status_code=403, detail="Invalid update signature")
+    except Exception:
+        raise HTTPException(status_code=403, detail="Signature verification failed")
+
 def _is_recent_presence(iso_value: str | None, seconds: int = 60) -> bool:
     if not iso_value:
         return False
@@ -266,8 +315,33 @@ def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
             return data
         raise HTTPException(status_code=502, detail="Forward failed")
 
+    if payload.caption and len(payload.caption) > MAX_UPDATE_CAPTION_CHARS:
+        raise HTTPException(status_code=400, detail="Caption too long")
+
+    if len(payload.imageBase64.encode("utf-8")) > MAX_UPDATE_IMAGE_BASE64_BYTES:
+        raise HTTPException(status_code=413, detail="Update image too large")
+
+    try:
+        image_bytes = base64.b64decode(payload.imageBase64, validate=True)
+    except binascii.Error:
+        raise HTTPException(status_code=400, detail="Invalid image base64")
+
+    update_id = uuid.uuid4().hex
+
+    verify_update_device_signature(
+        db=db,
+        blank_id=owner_id,
+        device_id=payload.ownerDeviceID,
+        action="update_post",
+        update_id=update_id,
+        request_timestamp=payload.requestTimestamp,
+        signature_base64=payload.signatureBase64,
+    )
+
     row = UserUpdate(
-        id=uuid.uuid4().hex,
+        id=update_id,
+        owner_device_id=payload.ownerDeviceID,
+        image_sha256=sha256(image_bytes).hexdigest(),
         owner_blank_id=owner_id,
         owner_display_name=payload.ownerDisplayName,
         caption=payload.caption,
@@ -344,6 +418,16 @@ def delete_update(update_id: str, payload: UpdateDeleteRequest, db: Session = De
 
     if row.owner_blank_id != owner_id:
         raise HTTPException(status_code=403, detail="Only owner can delete update")
+
+    verify_update_device_signature(
+        db=db,
+        blank_id=owner_id,
+        device_id=payload.ownerDeviceID,
+        action="update_delete",
+        update_id=update_id,
+        request_timestamp=payload.requestTimestamp,
+        signature_base64=payload.signatureBase64,
+    )
 
     row.is_deleted = True
     db.commit()

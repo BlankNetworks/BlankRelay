@@ -148,3 +148,6 @@ class UserUpdate(Base):
     image_base64 = Column(Text, nullable=False)
     created_at = Column(String, nullable=False)
     is_deleted = Column(Boolean, default=False)
+    owner_device_id = Column(String, index=True, nullable=True)
+    image_sha256 = Column(String, nullable=True)
+

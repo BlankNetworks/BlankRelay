@@ -316,15 +316,22 @@ class ReceiptResponse(BaseModel):
     processedCount: int
     message: str
 
+
 class UpdatePostRequest(BaseModel):
     ownerBlankID: str
+    ownerDeviceID: str
     ownerDisplayName: str
     caption: str | None = None
     imageBase64: str
+    requestTimestamp: str
+    signatureBase64: str
 
 
 class UpdateDeleteRequest(BaseModel):
     ownerBlankID: str
+    ownerDeviceID: str
+    requestTimestamp: str
+    signatureBase64: str
 
 
 class UpdateItem(BaseModel):
