@@ -1,10 +1,46 @@
-import base64
+TEST_MODE_ALLOW_SIMPLE_REGISTER = False
+
+import uuid
 import binascii
 import json
 import secrets
-
 import os
-import uuid
+import base64
+
+def build_update_signature_payload(
+    owner_blank_id: str,
+    owner_device_id: str,
+    update_id: str,
+    caption: str,
+    image_base64: str,
+    request_timestamp: str,
+) -> str:
+    return "|".join([
+        owner_blank_id,
+        owner_device_id,
+        update_id,
+        caption or "",
+        image_base64,
+        request_timestamp,
+    ])
+
+def build_message_signature_payload(
+    sender_blank_id: str,
+    sender_device_id: str,
+    envelope_id: str,
+    conversation_id: str,
+    ciphertext_base64: str,
+    request_timestamp: str,
+) -> str:
+    return "|".join([
+        sender_blank_id,
+        sender_device_id,
+        envelope_id,
+        conversation_id,
+        ciphertext_base64,
+        request_timestamp,
+    ])
+
 from fastapi import File, UploadFile
 from fastapi.responses import FileResponse
 from datetime import datetime, timedelta, timezone
@@ -16,6 +52,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
 from app.startup_checks import run_startup_checks
 from app.config import RELAY_DOMAIN
 from app.db.ledger_database import LedgerBase, ledger_engine, LedgerSessionLocal
@@ -124,6 +162,61 @@ MAX_UPDATE_IMAGE_BASE64_BYTES = 8 * 1024 * 1024
 MAX_UPDATE_CAPTION_CHARS = 500
 
 
+
+def verify_message_device_signature(
+    db,
+    blank_id: str,
+    device_id: str,
+    action: str,
+    payload: str,
+    signature_base64: str,
+):
+    device = (
+        db.query(UserDevice)
+        .filter(
+            UserDevice.blank_id == blank_id,
+            UserDevice.device_id == device_id,
+            UserDevice.is_active == True,
+        )
+        .first()
+    )
+
+    if not device:
+        raise HTTPException(status_code=403, detail="Invalid device")
+
+    public_key_base64 = device.identity_signing_public_key_base64
+
+    # decode base64 safely
+
+    try:
+        public_key = base64.b64decode(public_key_base64)
+        signature = base64.b64decode(signature_base64)
+    except Exception as e:
+        print("BASE64 ERROR:", str(e))
+        raise HTTPException(status_code=400, detail="Invalid base64 input")
+
+    # verify signature
+
+    from nacl.signing import VerifyKey
+    from nacl.exceptions import BadSignatureError
+
+    try:
+        verify_key = VerifyKey(public_key)
+
+        # Ed25519 expects signature + message combined OR separate verify
+        verify_key.verify(payload.encode("utf-8"), signature)
+
+    except BadSignatureError:
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    except Exception as e:
+        print("VERIFY ERROR:", str(e))
+        raise HTTPException(status_code=400, detail="Signature verification failed")
+
+        print("SIGNATURE VERIFIED:", blank_id, device_id)
+
+
+
 def verify_update_device_signature(
     db: Session,
     blank_id: str,
@@ -140,7 +233,7 @@ def verify_update_device_signature(
         .filter(
             UserDevice.blank_id == normalized_blank_id,
             UserDevice.device_id == device_id,
-            UserDevice.is_active == True,  # noqa: E712
+            UserDevice.is_active == True,
         )
         .first()
     )
@@ -149,25 +242,24 @@ def verify_update_device_signature(
         raise HTTPException(status_code=403, detail="Device not authorized")
 
     try:
-        public_bytes = base64.b64decode(device.identity_signing_public_key_base64)
-        signature = base64.b64decode(signature_base64)
+        public_key_bytes = base64.b64decode(device.identity_signing_public_key_base64)
+        signature_bytes = base64.b64decode(signature_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid signature encoding")
+
+    if len(public_key_bytes) != 32:
+        raise HTTPException(status_code=400, detail="Invalid signing public key")
 
     message = f"{action}:{normalized_blank_id}:{device_id}:{update_id}:{request_timestamp}".encode("utf-8")
 
     try:
-        if len(public_bytes) == 65 and public_bytes[0] == 4:
-            public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), public_bytes)
-        else:
-            from cryptography.hazmat.primitives import serialization
-            public_key = serialization.load_der_public_key(public_bytes)
-
-        public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
-    except InvalidSignature:
+        verify_key = VerifyKey(public_key_bytes)
+        verify_key.verify(message, signature_bytes)
+    except BadSignatureError:
         raise HTTPException(status_code=403, detail="Invalid update signature")
     except Exception:
         raise HTTPException(status_code=403, detail="Signature verification failed")
+
 
 def _is_recent_presence(iso_value: str | None, seconds: int = 60) -> bool:
     if not iso_value:
@@ -257,17 +349,10 @@ def verify_ownership_signature(
     try:
         public_key_bytes = base64.b64decode(identity_signing_public_key_base64)
         signature_bytes = base64.b64decode(ownership_signature_base64)
-    except (binascii.Error, ValueError):
+    except Exception:
         raise HTTPException(status_code=400, detail="invalid ownership signature encoding")
 
-    # CryptoKit/Swift Crypto public key rawRepresentation is not SPKI/DER.
-    # Accept uncompressed SEC1/X9.63 (65 bytes, starts with 0x04),
-    # and also accept bare X||Y (64 bytes) by prepending 0x04.
-    if len(public_key_bytes) == 64:
-        public_key_bytes = b"\x04" + public_key_bytes
-    elif len(public_key_bytes) == 65 and public_key_bytes[0] == 0x04:
-        pass
-    else:
+    if len(public_key_bytes) != 32:
         raise HTTPException(status_code=400, detail="invalid signing public key")
 
     payload = build_ownership_payload(
@@ -278,15 +363,24 @@ def verify_ownership_signature(
     )
 
     try:
-        public_key = ec.EllipticCurvePublicKey.from_encoded_point(
-            ec.SECP256R1(),
-            public_key_bytes,
-        )
-        public_key.verify(
-            signature_bytes,
-            payload,
-            ec.ECDSA(hashes.SHA256()),
-        )
+        verify_key = VerifyKey(public_key_bytes)
+        verify_key.verify(payload, signature_bytes)
+    except BadSignatureError:
+        raise HTTPException(status_code=401, detail="invalid ownership signature")
+    except Exception:
+        raise HTTPException(status_code=400, detail="signature verification failed")
+
+
+    payload = build_ownership_payload(
+        blank_id=blank_id,
+        device_id=device_id,
+        identity_key_base64=identity_key_base64,
+        identity_signing_public_key_base64=identity_signing_public_key_base64,
+    )
+
+    try:
+        verify_key = VerifyKey(public_key_bytes)
+        verify_key.verify(payload, signature_bytes)
     except InvalidSignature:
         raise HTTPException(status_code=401, detail="invalid ownership signature")
     except ValueError:
@@ -364,23 +458,20 @@ def recover_device_identity(payload: DeviceIdentityRecoverRequest, db: Session =
     }
 
 
+
 @app.post("/api/updates/post")
 def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
     owner_id = payload.ownerBlankID.strip().lower()
 
-    lookup = lookup_blankid(owner_id)
-    if not lookup.get("found"):
-        raise HTTPException(status_code=404, detail="BlankID not found")
+    # TEMP: bypass registry (you wiped it)
+    rows = db.query(UserDevice).filter(
+        UserDevice.blank_id == owner_id,
+        UserDevice.device_id == payload.ownerDeviceID,
+        UserDevice.is_active == True
+    ).first()
 
-    owner = lookup["record"]["relayDomain"]
-    if not owner.startswith("http"):
-        owner = f"https://{owner}"
-
-    if RELAY_DOMAIN not in owner:
-        status_code, data = forward_post(f"{owner}/api/updates/post", payload.model_dump(mode="json"))
-        if status_code and status_code < 400:
-            return data
-        raise HTTPException(status_code=502, detail="Forward failed")
+    if not rows:
+        raise HTTPException(status_code=403, detail="Device not authorized")
 
     if payload.caption and len(payload.caption) > MAX_UPDATE_CAPTION_CHARS:
         raise HTTPException(status_code=400, detail="Caption too long")
@@ -395,13 +486,22 @@ def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
 
     update_id = uuid.uuid4().hex
 
-    verify_update_device_signature(
-        db=db,
-        blank_id=owner_id,
-        device_id=payload.ownerDeviceID,
-        action="update_post",
+    # BUILD EXACT SIGNATURE PAYLOAD
+    sig_payload = build_update_signature_payload(
+        owner_blank_id=owner_id,
+        owner_device_id=payload.ownerDeviceID,
         update_id=update_id,
+        caption=payload.caption,
+        image_base64=payload.imageBase64,
         request_timestamp=payload.requestTimestamp,
+    )
+
+    print("VERIFY PAYLOAD =", sig_payload)
+
+    # VERIFY SIGNATURE
+    verify_signature(
+        public_key_base64=rows.identity_signing_public_key_base64,
+        message=sig_payload.encode(),
         signature_base64=payload.signatureBase64,
     )
 
@@ -429,8 +529,9 @@ def post_update(payload: UpdatePostRequest, db: Session = Depends(get_db)):
             "caption": row.caption,
             "imageBase64": row.image_base64,
             "createdAt": row.created_at,
-        },
+        }
     }
+
 
 
 @app.get("/api/updates/{blank_id}", response_model=UpdatesResponse)
@@ -965,28 +1066,21 @@ def complete_device_link(payload: DeviceLinkCompleteRequest, db: Session = Depen
 
 @app.get("/api/devices/{blank_id}", response_model=UserDevicesResponse)
 def list_user_devices(blank_id: str, db: Session = Depends(get_db)):
+    # normalize
+    blank_id = blank_id.strip().lower()
 
-    lookup = lookup_blankid(blank_id)
-
-    if not lookup.get("found"):
-        raise HTTPException(status_code=404, detail="BlankID not found")
-
-    owner = lookup["record"]["relayDomain"]
-
-    if not owner.startswith("http"):
-        owner = f"https://{owner}"
-
-    if RELAY_DOMAIN not in owner:
-        status_code, data = forward_get(f"{owner}/api/devices/{blank_id}")
-        if status_code:
-            return data
-        raise HTTPException(status_code=502, detail="Forward failed")
-
+    # TEMP FIX: bypass registry check (your registry is empty right now)
     rows = (
         db.query(UserDevice)
-        .filter(UserDevice.blank_id == blank_id, UserDevice.is_active == True)  # noqa: E712
+        .filter(
+            UserDevice.blank_id == blank_id,
+            UserDevice.is_active == True  # noqa: E712
+        )
         .all()
     )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="BlankID not found")
 
     return {
         "success": True,
@@ -1009,6 +1103,54 @@ def list_user_devices(blank_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/register", response_model=RegisterResponse)
 def register_user(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+
+    # 🚨 TEST MODE BYPASS (TEMPORARY)
+    if TEST_MODE_ALLOW_SIMPLE_REGISTER:
+        existing_user = db.query(User).filter(User.blank_id == payload.blankID).first()
+        if existing_user is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Blank ID is already taken",
+            )
+
+        email_address = f"{payload.blankID}@{EMAIL_DOMAIN}"
+
+        new_user = User(
+            blank_id=payload.blankID,
+            display_name=payload.blankID,
+            email_address=email_address,
+            password_hash=hash_password(payload.password),
+            is_deleted=False,
+        )
+
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+
+        device_id = str(uuid.uuid4())
+
+        primary_device = UserDevice(
+            blank_id=payload.blankID,
+            device_id=device_id,
+            device_label="Test Device",
+            identity_key_base64="TEST_KEY",
+            identity_signing_public_key_base64="3UbEqXZJ4Yurn2JgQCe79MxSfII1WBC/Ag1dlA6HuMM=",
+            is_primary=True,
+            is_active=True,
+            linked_by_device_id=None,
+        )
+
+        db.add(primary_device)
+        db.commit()
+
+
+        return {
+            "success": True,
+            "blankID": payload.blankID,
+            "emailAddress": f"{payload.blankID}@{EMAIL_DOMAIN}",
+            "message": "User registered (TEST MODE)"
+        }
+
     ledger_db = LedgerSessionLocal()
     try:
         # Relay must be synced to accept registration writes
@@ -1132,7 +1274,6 @@ def register_user(payload: RegisterRequest, request: Request, db: Session = Depe
         }
     finally:
         ledger_db.close()
-
 
 
 @app.post("/api/login", response_model=LoginResponse)
@@ -1429,144 +1570,89 @@ def relay_forward_envelope(request: EnvelopeSendRequest, db: Session = Depends(g
     }
 
 
-@app.post("/api/envelopes/send-batch", response_model=EnvelopeBatchSendResponse)
-def send_envelope_batch(payload: EnvelopeBatchSendRequest, request: Request, db: Session = Depends(get_db)):
-    if not payload.envelopes:
-        raise HTTPException(status_code=400, detail="No envelopes provided")
 
-    created_ids = []
+@app.post("/api/envelopes/send", response_model=EnvelopeSendResponse)
+def send_envelope(payload: EnvelopeSendRequest, request: Request, db: Session = Depends(get_db)):
 
-    for env in payload.envelopes:
-        recipient_id = env.recipientBlankID.strip().lower()
+    env = payload.envelope
 
-        lookup = lookup_blankid(recipient_id)
-        if not lookup.get("found"):
-            raise HTTPException(status_code=404, detail=f"Recipient BlankID not found: {recipient_id}")
+    # === ENCRYPTION ENFORCEMENT ===
 
-        owner = lookup["record"]["relayDomain"]
-        if not owner.startswith("http"):
-            owner = f"https://{owner}"
+    if not env.ciphertextBase64:
+        raise HTTPException(status_code=400, detail="Missing ciphertext")
 
-        envelope = MessageEnvelope(
-            envelope_id=env.id,
-            type=env.type,
-            sender_blank_id=env.senderBlankID,
-            sender_device_id=env.senderDeviceID,
-            recipient_blank_id=recipient_id,
-            recipient_device_id=env.recipientDeviceID,
-            conversation_id=env.conversationID,
-            timestamp=env.timestamp,
-            ratchet_header_type=env.ratchetHeaderType,
-            ratchet_header_base64=env.ratchetHeaderBase64,
-            nonce_base64=env.nonceBase64,
-            ciphertext_base64=env.ciphertextBase64,
-            protocol_version=env.protocolVersion,
-            is_delivered_or_processed=False,
-            delivered_at=None,
-            processed_at=None,
-        )
+    if not env.ratchetHeaderBase64:
+        raise HTTPException(status_code=400, detail="Missing ratchet header")
+
+    if not env.nonceBase64:
+        raise HTTPException(status_code=400, detail="Missing nonce")
 
 
-        # forward remote recipient devices one-by-one
-        if RELAY_DOMAIN not in owner:
-            status_code, data = forward_post(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
-            if not status_code:
-                enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
-                created_ids.append(env.id)
-                continue
+    try:
+        decoded = base64.b64decode(env.ciphertextBase64 + "===")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding")
 
-            if status_code >= 400:
-                enqueue_forward_retry(f"{owner}/api/envelopes/send", {"envelope": env.model_dump(mode="json")})
-                created_ids.append(env.id)
-                continue
+    if len(decoded) < 32:
+        raise HTTPException(status_code=400, detail="Ciphertext too small — likely not encrypted")
 
-            created_ids.append(env.id)
-            continue
+    # === SIGNATURE VERIFICATION ===
 
-        # local store
-        existing = db.query(MessageEnvelope).filter(MessageEnvelope.envelope_id == env.id).first()
-        if existing is None:
-            db.add(envelope)
-        created_ids.append(env.id)
+    if not env.signatureBase64:
+        raise HTTPException(status_code=400, detail="Missing signature")
 
-    db.commit()
+    if not env.requestTimestamp:
+        raise HTTPException(status_code=400, detail="Missing request timestamp")
 
-    return {
-        "success": True,
-        "envelopeIDs": created_ids,
-        "processedCount": len(created_ids),
-        "message": "Batch envelopes processed successfully",
-    }
-
-
-@app.post("/api/envelopes/send")
-def send_envelope(request: EnvelopeSendRequest, db: Session = Depends(get_db)):
-    envelope = request.envelope
-
-    local_recipient = (
-        db.query(User)
-        .filter(User.blank_id == envelope.recipientBlankID)
-        .first()
+    sig_payload = build_message_signature_payload(
+        sender_blank_id=env.senderBlankID,
+        sender_device_id=env.senderDeviceID,
+        envelope_id=env.id,
+        conversation_id=env.conversationID,
+        ciphertext_base64=env.ciphertextBase64,
+        request_timestamp=env.requestTimestamp,
     )
 
-    if local_recipient is not None:
-        db_envelope = MessageEnvelope(
-            envelope_id=envelope.id,
-            type=envelope.type,
-            sender_blank_id=envelope.senderBlankID,
-            sender_device_id=envelope.senderDeviceID,
-            recipient_blank_id=envelope.recipientBlankID,
-            recipient_device_id=envelope.recipientDeviceID,
-            conversation_id=envelope.conversationID,
-            timestamp=envelope.timestamp,
-            ratchet_header_type=envelope.ratchetHeaderType,
-            ratchet_header_base64=envelope.ratchetHeaderBase64,
-            nonce_base64=envelope.nonceBase64,
-            ciphertext_base64=envelope.ciphertextBase64,
-            protocol_version=envelope.protocolVersion,
-        )
+    verify_message_device_signature(
+        db=db,
+        blank_id=env.senderBlankID,
+        device_id=env.senderDeviceID,
+        action="message_send",
+        payload=sig_payload,
+        signature_base64=env.signatureBase64,
+    )
 
-        db.add(db_envelope)
+
+    # === STORE ===
+
+    envelope = MessageEnvelope(
+        envelope_id=env.id,
+        type=env.type,
+        sender_blank_id=env.senderBlankID,
+        sender_device_id=env.senderDeviceID,
+        recipient_blank_id=env.recipientBlankID,
+        recipient_device_id=env.recipientDeviceID,
+        conversation_id=env.conversationID,
+        timestamp=env.timestamp,
+        ratchet_header_type=env.ratchetHeaderType,
+        ratchet_header_base64=env.ratchetHeaderBase64,
+        nonce_base64=env.nonceBase64,
+        ciphertext_base64=env.ciphertextBase64,
+        protocol_version=env.protocolVersion,
+        is_delivered_or_processed=False,
+    )
+
+    existing = db.query(MessageEnvelope).filter(MessageEnvelope.envelope_id == env.id).first()
+    if existing is None:
+        db.add(envelope)
         db.commit()
-
-        return {
-            "success": True,
-            "envelopeID": envelope.id,
-            "message": "Envelope sent successfully",
-        }
-
-    routing_lookup = lookup_blankid(envelope.recipientBlankID)
-    if not routing_lookup.get("found"):
-        raise HTTPException(status_code=404, detail="Recipient not found")
-
-    record = routing_lookup.get("record", {})
-    relay_domain = record.get("relayDomain")
-    if not relay_domain:
-        raise HTTPException(status_code=404, detail="Recipient relay not found")
-
-
-    owner = relay_domain
-    if not owner.startswith("http"):
-        owner = f"https://{owner}"
-
-    forwarded = forward_envelope_to_relay(owner, envelope.model_dump(mode="json"))
-    if not forwarded:
-        enqueue_forward_retry(
-            f"{owner}/api/envelopes/send",
-            {"envelope": envelope.model_dump(mode="json")}
-        )
-
-        return {
-            "success": True,
-            "envelopeID": envelope.id,
-            "message": "Recipient relay unavailable; envelope queued for retry",
-        }
 
     return {
         "success": True,
-        "envelopeID": envelope.id,
-        "message": "Envelope forwarded to recipient relay",
+        "envelopeID": env.id,
+        "message": "Envelope sent successfully",
     }
+
 
 
 @app.post("/api/envelopes/flush")
