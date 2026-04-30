@@ -111,20 +111,17 @@ class IDCheckResponse(BaseModel):
     available: bool
 
 
+from typing import Optional
+
 class RegisterRequest(BaseModel):
-    blankID: str = Field(min_length=3, max_length=32)
-    displayName: str = Field(min_length=1, max_length=128)
-    password: str = Field(min_length=3, max_length=255)
+    blankID: str
+    password: str
 
-    identityKeyBase64: str
-    identitySigningPublicKeyBase64: str
-    ownershipSignatureBase64: str
-    nonce: str = Field(min_length=1, max_length=128)
-
-    @field_validator("blankID")
-    @classmethod
-    def normalize_blank_id_field(cls, v: str) -> str:
-        return normalize_blank_id(v)
+    displayName: Optional[str] = None
+    identityKeyBase64: Optional[str] = None
+    identitySigningPublicKeyBase64: Optional[str] = None
+    ownershipSignatureBase64: Optional[str] = None
+    nonce: Optional[str] = None
 
 
 class RegisterResponse(BaseModel):
@@ -238,16 +235,22 @@ class PrekeyBundleFetchResponse(BaseModel):
 class EnvelopePayload(BaseModel):
     id: str
     type: str
-    senderBlankID: str = Field(min_length=3, max_length=32)
-    senderDeviceID: str = Field(min_length=1, max_length=128)
-    recipientBlankID: str = Field(min_length=3, max_length=32)
-    recipientDeviceID: Optional[str] = None
+    senderBlankID: str
+    senderDeviceID: str
+    recipientBlankID: str
+    recipientDeviceID: Optional[str]
     conversationID: str
     timestamp: datetime
+
     ratchetHeaderType: Optional[str] = None
     ratchetHeaderBase64: Optional[str] = None
     nonceBase64: Optional[str] = None
+
     ciphertextBase64: str
+
+    requestTimestamp: str
+    signatureBase64: str
+
     protocolVersion: int = 1
 
     @field_validator("senderBlankID", "recipientBlankID")

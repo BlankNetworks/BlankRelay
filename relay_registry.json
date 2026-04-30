@@ -1,5 +1,6 @@
 {
   "relays": [
-    "https://blankcoms.duckdns.org"
+    "https://blankcoms.duckdns.org",
+    "https://blankrelay.duckdns.org"
   ]
 }
