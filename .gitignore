@@ -1,14 +1,32 @@
+# === ENV / VENV ===
 .env
 venv/
+
+# === PYTHON ===
 __pycache__/
 *.pyc
-blankcoms.db
-identity_ledger.db
+
+# === DATABASES ===
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 *.save
+
+# === RUNTIME DATA (DO NOT TRACK) ===
+uploads/
+registry_backups/
+
+# === REGISTRY (SIGNED OUTPUT - DO NOT TRACK LOCAL STATE) ===
 registry/
+
+# === TEMP / DEV FILES ===
+*.bak
 *.log
-update_blankrelay.sh
+
+# === KEYS / SECRETS ===
 registry_keys/registry_private_key.pem
+
+# === SCRIPTS (LOCAL ONLY) ===
+update_blankrelay.sh
